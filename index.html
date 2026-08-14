@@ -20,6 +20,7 @@
   --steel:#6ea4c4;
   --steel-dim:#3d5e73;
   --rust:#c4886e;
+  --gold:#c4b06e;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   --disp:"Space Grotesk","Helvetica Neue",Helvetica,sans-serif;
   --rail:296px;
@@ -73,6 +74,11 @@ button{cursor:pointer;background:none;border:none}
   margin-bottom:12px;display:flex;align-items:center;gap:8px;
 }
 .sec h2::after{content:"";flex:1;height:1px;background:var(--line)}
+.sub{
+  font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dimmer);
+  margin:14px 0 7px;
+}
+.sub:first-of-type{margin-top:0}
 
 .row{display:flex;align-items:center;gap:8px;margin-bottom:9px}
 .row:last-child{margin-bottom:0}
@@ -86,6 +92,13 @@ input[type=number],select,input[type=text]{
 select{width:auto;min-width:92px}
 input[type=text]{width:100%}
 input[type=number]:focus,select:focus,input[type=text]:focus{border-color:var(--steel-dim)}
+input[type=color]{
+  -webkit-appearance:none;appearance:none;width:30px;height:24px;padding:0;
+  background:none;border:1px solid var(--line-hot);border-radius:2px;cursor:pointer;
+}
+input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+input[type=color]::-webkit-color-swatch{border:none;border-radius:1px}
+input[type=color]::-moz-color-swatch{border:none;border-radius:1px}
 
 input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:none}
 input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--line-hot)}
@@ -130,6 +143,23 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .btn-grid .span2{grid-column:1/-1}
 
+/* hero action */
+.hero{
+  width:100%;display:block;border:1px solid var(--steel-dim);
+  background:linear-gradient(180deg,#12202a,#0d1720);
+  color:var(--steel);padding:12px 10px;border-radius:2px;
+  font-family:var(--disp);font-weight:700;letter-spacing:.16em;
+  font-size:11px;text-transform:uppercase;
+  transition:background .14s,color .14s,border-color .14s;
+}
+.hero:hover{background:linear-gradient(180deg,#183040,#102030);color:#bfe0f2;border-color:var(--steel)}
+.hero:active{background:#0d1720}
+.hero small{
+  display:block;font-family:var(--mono);font-weight:400;font-size:9px;
+  letter-spacing:.1em;color:var(--steel-dim);margin-top:4px;text-transform:uppercase;
+}
+.hero:disabled{opacity:.4;cursor:not-allowed}
+
 /* segmented */
 .seg{display:flex;border:1px solid var(--line-hot);border-radius:2px;overflow:hidden}
 .seg button{
@@ -139,6 +169,7 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 .seg button:last-child{border-right:none}
 .seg button.on{background:#12202a;color:var(--steel)}
 .seg button:hover:not(.on){color:var(--ink)}
+.seg.mini button{padding:5px 2px;font-size:9px}
 
 /* ---------- sources ---------- */
 .drop{
@@ -175,6 +206,7 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 }
 .src-meta .pill:hover{border-color:var(--steel-dim)}
 .src-meta .pill.free{color:var(--rust)}
+.src-edit{color:var(--gold);font-size:9px;letter-spacing:.06em;text-transform:uppercase}
 
 /* ---------- stage ---------- */
 .stage{
@@ -182,9 +214,15 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
   background:
     radial-gradient(120% 80% at 50% 0%,#0a0a0d 0%,#050505 70%);
 }
+.viewbar{
+  border-bottom:1px solid var(--line);background:var(--panel);
+  padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.viewbar .seg{min-width:210px}
 .view{
   flex:1;min-height:320px;position:relative;display:flex;
   align-items:center;justify-content:center;overflow:hidden;
+  touch-action:none;
 }
 #view{image-rendering:pixelated;image-rendering:crisp-edges}
 .hud{
@@ -196,6 +234,11 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 .hud .v{color:var(--steel)}
 .hud .v.bad{color:var(--rust)}
 .hud-r{margin-left:auto}
+.splitlabel{
+  position:absolute;bottom:12px;left:14px;right:14px;pointer-events:none;
+  display:flex;justify-content:space-between;
+  color:var(--dimmer);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+}
 
 .empty{color:var(--dimmer);text-align:center;padding:40px 20px;max-width:340px}
 .empty b{display:block;font-family:var(--disp);letter-spacing:.16em;font-size:12px;color:var(--dim);margin-bottom:10px;text-transform:uppercase;font-weight:500}
@@ -226,6 +269,7 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
   font-weight:400;
 }
 .cell.on b{color:var(--steel)}
+.cell.edited{border-color:var(--gold)}
 
 /* palette */
 .swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin-top:10px}
@@ -247,12 +291,69 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 .readout span:last-child{color:var(--ink);font-variant-numeric:tabular-nums}
 .readout span.hot{color:var(--rust)}
 .readout span.good{color:var(--steel)}
+.readout span.warn{color:var(--gold)}
+
+/* integrity */
+.score{display:flex;align-items:baseline;gap:8px}
+.score b{
+  font-family:var(--disp);font-weight:700;font-size:30px;letter-spacing:-.02em;
+  color:var(--steel);font-variant-numeric:tabular-nums;line-height:1;
+}
+.score i{font-style:normal;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.score b.s-ex{color:#7fc49a} .score i.s-ex{color:#7fc49a}
+.score b.s-cl{color:var(--steel)} .score i.s-cl{color:var(--steel)}
+.score b.s-nr{color:var(--gold)} .score i.s-nr{color:var(--gold)}
+.score b.s-po{color:var(--rust)} .score i.s-po{color:var(--rust)}
+.meter{height:2px;background:var(--line);margin:10px 0 12px;position:relative;overflow:hidden}
+.meter div{height:100%;background:var(--steel);transition:width .2s}
+.meter div.s-ex{background:#7fc49a}
+.meter div.s-nr{background:var(--gold)}
+.meter div.s-po{background:var(--rust)}
 
 .foot{
   padding:14px 16px;color:var(--dimmer);font-size:9px;letter-spacing:.14em;
   text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;
 }
 .hide{display:none!important}
+
+/* ---------- pixel editor ---------- */
+.modal{
+  position:fixed;inset:0;z-index:60;background:rgba(3,3,4,.94);
+  display:flex;flex-direction:column;
+}
+.ed-top{
+  border-bottom:1px solid var(--line);background:var(--panel);
+  padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.ed-title{font-family:var(--disp);font-weight:700;letter-spacing:.14em;font-size:11px;text-transform:uppercase}
+.ed-title span{color:var(--gold)}
+.ed-stage{
+  flex:1;min-height:0;overflow:auto;display:flex;align-items:center;
+  justify-content:center;padding:20px;touch-action:none;
+}
+#edCv{image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair;flex:0 0 auto}
+.ed-bot{
+  border-top:1px solid var(--line);background:var(--panel);padding:10px 14px;
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+}
+.ed-pal{display:flex;gap:3px;flex-wrap:wrap;max-width:100%;flex:1;min-width:120px}
+.ed-pal .sw{
+  width:18px;height:18px;aspect-ratio:auto;cursor:pointer;border:1px solid #000;
+}
+.ed-pal .sw.on{outline:1px solid var(--steel);outline-offset:1px}
+.ed-cur{
+  width:26px;height:26px;border:1px solid var(--line-hot);flex:0 0 auto;
+  background-image:linear-gradient(45deg,#1a1a1e 25%,transparent 25%,transparent 75%,#1a1a1e 75%),
+                   linear-gradient(45deg,#1a1a1e 25%,transparent 25%,transparent 75%,#1a1a1e 75%);
+  background-size:8px 8px;background-position:0 0,4px 4px;
+}
+.ed-cur i{display:block;width:100%;height:100%}
+.ed-stat{color:var(--dimmer);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.ed-stat b{color:var(--steel);font-weight:400;font-variant-numeric:tabular-nums}
+@media (max-width:700px){
+  .ed-top,.ed-bot{gap:6px;padding:8px 10px}
+  .ed-title{width:100%}
+}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -262,7 +363,7 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 
   <header class="top">
     <div class="mark">PIXEL<span>SMITH</span></div>
-    <div class="tag">grid conformer &amp; sprite exporter</div>
+    <div class="tag">ai pixel-art repair &amp; sprite prep</div>
     <div class="top-sp"></div>
     <button class="btn" id="btnLoad">Load art</button>
     <input type="file" id="file" accept="image/*" multiple hidden>
@@ -274,16 +375,14 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
     <aside class="rail">
 
       <section class="sec">
-        <h2>Sources</h2>
+        <h2>Source</h2>
         <div class="drop" id="drop">
           <b>Drop images</b>
           PNG · WebP · strips or singles
         </div>
         <div id="srcList" style="margin-top:10px"></div>
-      </section>
 
-      <section class="sec">
-        <h2>Source grid</h2>
+        <div class="sub">Background</div>
         <button class="tog on" id="togKey"><i></i><span>Key out background</span></button>
         <div class="row">
           <label>Key tolerance</label>
@@ -295,7 +394,9 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
           <label>Min elongation</label>
           <input type="number" id="pocketAspect" min="1.5" max="20" step="0.5" value="4">
         </div>
-        <button class="tog on" id="togSnap" style="margin-top:10px"><i></i><span>Snap to source grid</span></button>
+
+        <div class="sub">Grid detection</div>
+        <button class="tog on" id="togSnap"><i></i><span>Snap to source grid</span></button>
         <div class="row">
           <label>Block pitch</label>
           <input type="number" id="pitch" min="0" max="64" step="0.01" value="0" placeholder="auto">
@@ -310,30 +411,120 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
       </section>
 
       <section class="sec">
-        <h2>Pixel grid</h2>
+        <h2>Output size</h2>
         <div class="row">
-          <label>Cell size</label>
-          <select id="target">
-            <option value="16">16 px</option>
-            <option value="24">24 px</option>
-            <option value="32">32 px</option>
-            <option value="48">48 px</option>
-            <option value="64" selected>64 px</option>
-            <option value="96">96 px</option>
-            <option value="128">128 px</option>
-            <option value="0">custom</option>
+          <label>Preset</label>
+          <select id="sizePreset">
+            <option value="32x32">32 × 32</option>
+            <option value="48x48">48 × 48</option>
+            <option value="64x64">64 × 64</option>
+            <option value="64x96">64 × 96</option>
+            <option value="64x128" selected>64 × 128</option>
+            <option value="96x128">96 × 128</option>
+            <option value="96x192">96 × 192</option>
+            <option value="128x128">128 × 128</option>
+            <option value="custom">Custom</option>
           </select>
         </div>
-        <div class="row hide" id="rowCustom">
-          <label>Custom</label>
-          <input type="number" id="targetCustom" min="8" max="512" step="1" value="64">
+        <div class="row">
+          <label>Width</label>
+          <input type="number" id="outW" min="8" max="512" step="1" value="64">
         </div>
+        <div class="row">
+          <label>Height</label>
+          <input type="number" id="outH" min="8" max="512" step="1" value="128">
+        </div>
+        <button class="tog on" id="togAspect"><i></i><span>Lock aspect ratio</span></button>
         <div class="row">
           <label>Alpha cutoff</label>
           <span class="val" id="alphaVal">128</span>
         </div>
         <input type="range" id="alpha" min="1" max="254" value="128">
-        <div class="note">Every edge pixel lands fully on or fully off. No soft fringe, no halo when the sprite scales up.</div>
+        <div class="note">The sprite is fitted inside the canvas at its own aspect ratio — never stretched to fill. Content scaling above 1× snaps to whole numbers. Every edge pixel lands fully on or fully off.</div>
+      </section>
+
+      <section class="sec">
+        <h2>Pixel repair</h2>
+        <button class="hero" id="btnPerfect" disabled>Make pixel perfect<small>run the full repair pipeline</small></button>
+
+        <div class="sub">Artifacts</div>
+        <button class="tog on" id="togIso"><i></i><span>Clean isolated pixels</span></button>
+        <div class="seg mini" id="isoStrength">
+          <button data-v="1">1 px</button>
+          <button data-v="2" class="on">1–2 px</button>
+          <button data-v="3">1–3 px</button>
+        </div>
+        <button class="tog on" id="togPin" style="margin-top:10px"><i></i><span>Fill pinholes</span></button>
+        <div class="seg mini" id="pinStrength">
+          <button data-v="1">1 px</button>
+          <button data-v="2" class="on">1–2 px</button>
+          <button data-v="3">1–3 px</button>
+        </div>
+
+        <div class="sub">Edge cleanup</div>
+        <div class="seg mini" id="edgeLevel">
+          <button data-v="0">Off</button>
+          <button data-v="1" class="on">Low</button>
+          <button data-v="2">Med</button>
+          <button data-v="3">High</button>
+        </div>
+
+        <div class="sub">Outline</div>
+        <div class="seg mini" id="outlineN">
+          <button data-v="0">None</button>
+          <button data-v="1" class="on">1 px</button>
+          <button data-v="2">2 px</button>
+        </div>
+        <div class="row" style="margin-top:9px">
+          <label>Outline colour</label>
+          <input type="color" id="outlineCol" value="#000000">
+          <input type="text" id="outlineHex" value="#000000" style="width:72px">
+        </div>
+        <div class="row">
+          <label>Neighbourhood</label>
+          <select id="outlineConn">
+            <option value="8" selected>8-neighbour</option>
+            <option value="4">4-neighbour</option>
+          </select>
+        </div>
+
+        <div class="sub">Colour</div>
+        <button class="tog on" id="togMerge"><i></i><span>Merge near colours</span></button>
+        <div class="row">
+          <label>Merge tolerance</label>
+          <span class="val" id="mergeVal">6</span>
+        </div>
+        <input type="range" id="mergeTol" min="0" max="24" step="1" value="6">
+        <div class="note">Tolerance is perceptual (OKLab). <b>#315C83</b>, <b>#325D83</b> and <b>#315D84</b> collapse to one entry well before real shading steps do.</div>
+      </section>
+
+      <section class="sec">
+        <h2>Palette</h2>
+        <div class="seg" id="palMode">
+          <button data-v="off" class="on">Source</button>
+          <button data-v="quantize">Reduce</button>
+          <button data-v="locked">Locked</button>
+        </div>
+        <div class="sub">Target colours</div>
+        <div class="seg mini" id="palPreset">
+          <button data-v="8">8</button>
+          <button data-v="16">16</button>
+          <button data-v="24">24</button>
+          <button data-v="32" class="on">32</button>
+          <button data-v="48">48</button>
+          <button data-v="0">Src</button>
+        </div>
+        <div class="row" id="rowQuant" style="margin-top:10px">
+          <label>Colours</label>
+          <input type="number" id="quantN" min="2" max="64" step="1" value="32">
+        </div>
+        <div class="btn-grid" style="margin-top:8px">
+          <button class="btn span2" id="btnLock">Lock from current</button>
+          <button class="btn" id="btnPalCopy">Copy hex</button>
+          <button class="btn" id="btnPalClear">Clear</button>
+        </div>
+        <div id="swatches" class="swatches"></div>
+        <div class="pal-empty" id="palEmpty">No palette locked. Lock one, then every animation quantizes to the same colours.</div>
       </section>
 
       <section class="sec">
@@ -358,30 +549,22 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
         <div class="note">Locks every frame's feet to one line and one scale, so the character stops popping when animations switch. Set a jump to <b>free</b> if you want the hop baked into the art instead of driven by physics.</div>
       </section>
 
-      <section class="sec">
-        <h2>Palette</h2>
-        <div class="seg" id="palMode">
-          <button data-v="off" class="on">Source</button>
-          <button data-v="quantize">Reduce</button>
-          <button data-v="locked">Locked</button>
-        </div>
-        <div class="row" id="rowQuant" style="margin-top:10px">
-          <label>Colours</label>
-          <input type="number" id="quantN" min="2" max="64" step="1" value="16">
-        </div>
-        <div class="btn-grid" style="margin-top:8px">
-          <button class="btn span2" id="btnLock">Lock from current</button>
-          <button class="btn" id="btnPalCopy">Copy hex</button>
-          <button class="btn" id="btnPalClear">Clear</button>
-        </div>
-        <div id="swatches" class="swatches"></div>
-        <div class="pal-empty" id="palEmpty">No palette locked. Lock one, then every animation quantizes to the same colours.</div>
-      </section>
-
     </aside>
 
     <!-- ══════════ STAGE ══════════ -->
     <main class="stage">
+
+      <div class="viewbar">
+        <div class="seg" id="viewMode">
+          <button data-v="source">Source</button>
+          <button data-v="repaired" class="on">Repaired</button>
+          <button data-v="split">Split</button>
+        </div>
+        <button class="btn pri" id="btnEdit" disabled>Edit pixels</button>
+        <button class="tog" id="togGaps" style="margin:0"><i></i><span>Show narrow gaps</span></button>
+        <span class="tag" id="editBadge" style="margin-left:auto"></span>
+      </div>
+
       <div class="view" id="viewWrap">
         <div class="hud hide" id="hud">
           <span><span class="k">src</span> <span class="v" id="hudSrc">—</span></span>
@@ -389,9 +572,10 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
           <span class="hud-r"><span class="k">foot drift</span> <span class="v" id="hudDrift">—</span></span>
         </div>
         <canvas id="view" class="hide"></canvas>
+        <div class="splitlabel hide" id="splitLabel"><span>Source</span><span>Repaired</span></div>
         <div class="empty" id="empty">
           <b>Nothing loaded</b>
-          Drop a sprite strip or a single image. Strips are detected automatically when the width divides evenly by the height.
+          Drop AI-generated pixel art, a sprite strip, or a single image. Strips are detected automatically when the width divides evenly by the height.
         </div>
       </div>
 
@@ -418,7 +602,43 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
     <aside class="rail right">
 
       <section class="sec">
-        <h2>Export</h2>
+        <h2>Pixel integrity</h2>
+        <div class="score"><b id="scoreVal">—</b><i id="scoreLbl">no art loaded</i></div>
+        <div class="meter"><div id="scoreBar" style="width:0"></div></div>
+        <div class="readout"><span>Soft-edge pixels</span><span id="roSoft">—</span></div>
+        <div class="readout"><span>Isolated pixels</span><span id="roIso">—</span></div>
+        <div class="readout"><span>Pinholes</span><span id="roPin">—</span></div>
+        <div class="readout"><span>Narrow gaps</span><span id="roGaps">—</span></div>
+        <div class="readout"><span>Near-dupe colours</span><span id="roDupe">—</span></div>
+        <div class="note">A diagnostic, not a standard. It counts the things this tool knows how to fix.</div>
+      </section>
+
+      <section class="sec">
+        <h2>Readout</h2>
+        <div class="readout"><span>Block pitch</span><span id="roPitch">—</span></div>
+        <div class="readout"><span>Detected native</span><span id="roNative">—</span></div>
+        <div class="readout"><span>Source cell</span><span id="roSrc">—</span></div>
+        <div class="readout"><span>Output cell</span><span id="roOut">—</span></div>
+        <div class="readout"><span>Frames</span><span id="roFrames">—</span></div>
+        <div class="readout"><span>Colours in frame</span><span id="roColors">—</span></div>
+        <div class="readout"><span>Content height</span><span id="roH">—</span></div>
+        <div class="readout"><span>Foot drift</span><span id="roDrift">—</span></div>
+        <div class="readout"><span>Manual edits</span><span id="roEdits">—</span></div>
+      </section>
+
+      <section class="sec">
+        <h2>Export sprite</h2>
+        <div class="btn-grid">
+          <button class="btn pri span2" id="expNative">Native PNG · <span id="lbl1x">—</span></button>
+          <button class="btn" id="exp4">4× · <span id="lbl4x">—</span></button>
+          <button class="btn" id="exp8">8× · <span id="lbl8x">—</span></button>
+          <button class="btn span2" id="exp16">16× · <span id="lbl16x">—</span></button>
+        </div>
+        <div class="note">Every enlarged PNG is nearest-neighbour integer scaling of the native sprite. Nothing is re-rendered or resampled.</div>
+      </section>
+
+      <section class="sec">
+        <h2>Export sheets</h2>
         <div class="row">
           <label>Scale</label>
           <select id="scale">
@@ -446,24 +666,48 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
         <div class="note" id="expNote">—</div>
       </section>
 
-      <section class="sec">
-        <h2>Readout</h2>
-        <div class="readout"><span>Block pitch</span><span id="roPitch">—</span></div>
-        <div class="readout"><span>Source cell</span><span id="roSrc">—</span></div>
-        <div class="readout"><span>Output cell</span><span id="roOut">—</span></div>
-        <div class="readout"><span>Frames</span><span id="roFrames">—</span></div>
-        <div class="readout"><span>Colours in frame</span><span id="roColors">—</span></div>
-        <div class="readout"><span>Content height</span><span id="roH">—</span></div>
-        <div class="readout"><span>Foot drift</span><span id="roDrift">—</span></div>
-        <div class="readout"><span>Soft-edge pixels</span><span id="roSoft">—</span></div>
-      </section>
-
       <div class="foot">
         <span>KLINEKRAFT</span>
-        <span id="ver">v1.1</span>
+        <span id="ver">v2.0</span>
       </div>
     </aside>
 
+  </div>
+</div>
+
+<!-- ══════════ PIXEL EDITOR ══════════ -->
+<div class="modal hide" id="editor">
+  <div class="ed-top">
+    <div class="ed-title">EDIT <span>PIXELS</span></div>
+    <div class="seg mini" id="edTool" style="min-width:230px">
+      <button data-v="pencil" class="on">Pencil</button>
+      <button data-v="eraser">Eraser</button>
+      <button data-v="pick">Pick</button>
+      <button data-v="fill">Fill</button>
+    </div>
+    <button class="btn" id="edUndo">Undo</button>
+    <button class="btn" id="edRedo">Redo</button>
+    <div class="row" style="margin:0">
+      <select id="edZoom">
+        <option value="8">8×</option>
+        <option value="12">12×</option>
+        <option value="16" selected>16×</option>
+        <option value="24">24×</option>
+        <option value="32">32×</option>
+      </select>
+    </div>
+    <button class="tog on" id="edGrid" style="margin:0"><i></i><span>Grid</span></button>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="btn" id="edCancel">Cancel</button>
+      <button class="btn pri" id="edApply">Apply changes</button>
+    </div>
+  </div>
+  <div class="ed-stage" id="edStage"><canvas id="edCv"></canvas></div>
+  <div class="ed-bot">
+    <div class="ed-cur"><i id="edCur"></i></div>
+    <input type="color" id="edColor" value="#ffffff">
+    <div class="ed-pal" id="edPal"></div>
+    <div class="ed-stat">x <b id="edX">—</b> y <b id="edY">—</b> · <b id="edSize">—</b> · <b id="edChanged">0</b> px changed</div>
   </div>
 </div>
 
@@ -475,14 +719,33 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
    ════════════════════════════════════════════════ */
 const S = {
   anims: [], active: null,
-  target: 64, alpha: 128,
-  align: true, anchor: 'feet', floor: 0,
-  matchH: false, contentH: 56,
-  palMode: 'off', quantN: 16, palette: [],
+
+  /* output canvas */
+  outW: 64, outH: 128, aspectLock: true, alpha: 128,
+
+  /* alignment */
+  align: true, anchor: 'feet', floor: 0, matchH: false, contentH: 56,
+
+  /* palette */
+  palMode: 'off', quantN: 32, palette: [],
+
+  /* source grid */
   keyTol: 18, pitch: 0, snapColors: 32, pockets: true, pocketAspect: 4,
+
+  /* pixel repair */
+  iso: true, isoMax: 2,
+  pin: true, pinMax: 2,
+  edge: 1,                      /* 0 off · 1 low · 2 medium · 3 high */
+  outline: 1, outlineConn8: true, outlineCol: [0,0,0],
+  merge: true, mergeTol: 6,
+
+  /* export */
   scale: 8, cols: 8, bake: false,
+
+  /* view */
   zoom: 4, fit: true, playing: false, fps: 12, frame: 0,
-  showGrid: true, showBase: true
+  showGrid: true, showBase: true, showGaps: false,
+  view: 'repaired', split: 0.5
 };
 let uid = 0, raf = null, lastT = 0;
 
@@ -491,13 +754,16 @@ const $$ = s => Array.from(document.querySelectorAll(s));
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 
 /* ════════════════════════════════════════════════
-   IMAGE PIPELINE
+   IMAGE PIPELINE — shared primitives
    ════════════════════════════════════════════════ */
 
 function makeCanvas(w,h){
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h));
   return c;
+}
+function cloneImg(img){
+  return new ImageData(new Uint8ClampedArray(img.data), img.width, img.height);
 }
 
 /** Alpha-weighted box downsample. Weighting by alpha is what stops
@@ -531,6 +797,32 @@ function hardAlpha(img, cut){
   const d = img.data;
   for(let i=3; i<d.length; i+=4) d[i] = d[i] >= cut ? 255 : 0;
   return img;
+}
+
+/** soft = any partial alpha (all of it gets hardened away).
+ *  amb  = alpha the downsample could not decide — a genuinely fuzzy edge in
+ *         the source, which is the part worth scoring. */
+function countSoft(img){
+  const d = img.data; let soft = 0, amb = 0;
+  for(let i=3; i<d.length; i+=4){
+    if(d[i] > 0 && d[i] < 255){ soft++; if(d[i] >= 64 && d[i] <= 192) amb++; }
+  }
+  return {soft, amb};
+}
+
+/** Opaque pixels touching transparency — the natural denominator for any
+ *  edge-quality measure. Scoring fuzz against total area instead makes a big
+ *  sprite look clean and a small one look broken for identical edges. */
+function perimeterOf(img){
+  const {width:w, height:h, data:d} = img;
+  let n = 0;
+  for(let y=0; y<h; y++) for(let x=0; x<w; x++){
+    const k = y*w + x;
+    if(!d[k*4+3]) continue;
+    if(x === 0 || y === 0 || x === w-1 || y === h-1 ||
+       !d[(k-1)*4+3] || !d[(k+1)*4+3] || !d[(k-w)*4+3] || !d[(k+w)*4+3]) n++;
+  }
+  return n;
 }
 
 /* ---- palette ---- */
@@ -659,6 +951,39 @@ function mapPalette(img, pal){
   return img;
 }
 const hex = c => '#' + c.map(v => v.toString(16).padStart(2,'0')).join('');
+function parseHex(s){
+  const m = /^#?([0-9a-f]{6})$/i.exec((s||'').trim());
+  if(!m) return null;
+  const v = parseInt(m[1], 16);
+  return [(v>>16)&255, (v>>8)&255, v&255];
+}
+
+/* ---- perceptual colour distance (OKLab) ----
+   Euclidean RGB says #315C83 and #325D83 are as different as two blues that
+   are visibly distinct. OKLab does not, which is the whole point of a merge
+   tolerance the user can reason about. */
+const _labCache = new Map();
+function labOf(r,g,b){
+  const key = (r<<16)|(g<<8)|b;
+  let v = _labCache.get(key);
+  if(v) return v;
+  const f = c => { c/=255; return c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); };
+  const R = f(r), G = f(g), B = f(b);
+  const l = Math.cbrt(0.4122214708*R + 0.5363325363*G + 0.0514459929*B);
+  const m = Math.cbrt(0.2119034982*R + 0.6806995451*G + 0.1073969566*B);
+  const s = Math.cbrt(0.0883024619*R + 0.2817188376*G + 0.6299787005*B);
+  v = [
+    (0.2104542553*l + 0.7936177850*m - 0.0040720468*s) * 100,
+    (1.9779984951*l - 2.4285922050*m + 0.4505937099*s) * 100,
+    (0.0259040371*l + 0.7827717662*m - 0.8086757660*s) * 100
+  ];
+  if(_labCache.size < 60000) _labCache.set(key, v);
+  return v;
+}
+function labDist2(a, b){
+  const dl=a[0]-b[0], da=a[1]-b[1], db=a[2]-b[2];
+  return dl*dl + da*da + db*db;
+}
 
 /* ---- background key: flood fill inward from the border ----
    Flood fill rather than a colour match, so white shoes on a white
@@ -797,32 +1122,45 @@ function detectPitch(img, box){
    native resolution that guess is the rhythm of the drawing itself. Snapping
    on it destroys the asset. Genuine upscaled pixel art is near-constant inside
    each block, so measure that: sample blocks and report how much of each one
-   agrees with its own modal colour. Real grids score high, drawings do not. */
+   agrees with its own middle colour. Real grids score high, drawings do not.
+
+   Agreement is a distance, not a bucket index. Bucketing looks cheaper but a
+   generator's ±3 sensor-style noise straddles bucket boundaries, so a
+   perfectly flat block scores as if it held a dozen colours and genuine
+   upscaled art gets rejected as "blocks not uniform". Comparing against the
+   block's per-channel median with a tolerance is noise-proof and still scores
+   an already-native drawing low, which is the gate's whole purpose. */
+const NOISE_TOL = 10;      /* per-channel deviation still counted as "flat" */
 function gridConfidence(img, pitch, box){
   const {x0, y0, cw, ch} = box;
   const cols = Math.max(1, Math.round(cw/pitch)), rows = Math.max(1, Math.round(ch/pitch));
   const sd = img.data, sw = img.width;
-  const bins = new Map();
   let sum = 0, n = 0;
   const rStep = Math.max(1, Math.floor(rows/24)), cStep = Math.max(1, Math.floor(cols/12));
+  const R = [], G = [], B = [];
   for(let r=0; r<rows; r+=rStep) for(let c=0; c<cols; c+=cStep){
     const fy0 = y0 + r*ch/rows, fy1 = y0 + (r+1)*ch/rows;
     const fx0 = x0 + c*cw/cols, fx1 = x0 + (c+1)*cw/cols;
     const iy0 = Math.round(fy0 + (fy1-fy0)*0.15), iy1 = Math.max(iy0+1, Math.round(fy1 - (fy1-fy0)*0.15));
     const ix0 = Math.round(fx0 + (fx1-fx0)*0.15), ix1 = Math.max(ix0+1, Math.round(fx1 - (fx1-fx0)*0.15));
-    bins.clear();
-    let tot = 0;
-    for(let y=iy0; y<iy1; y++) for(let x=ix0; x<ix1; x++){
+    /* cap the samples per block so a 40px pitch costs the same as a 6px one */
+    const step = Math.max(1, Math.floor(Math.sqrt((iy1-iy0)*(ix1-ix0)/256)));
+    R.length = 0; G.length = 0; B.length = 0;
+    for(let y=iy0; y<iy1; y+=step) for(let x=ix0; x<ix1; x+=step){
       const i = (y*sw + x)*4;
       if(sd[i+3] < 128) continue;
-      tot++;
-      const b = ((sd[i]>>3)<<10) | ((sd[i+1]>>3)<<5) | (sd[i+2]>>3);
-      bins.set(b, (bins.get(b) || 0) + 1);
+      R.push(sd[i]); G.push(sd[i+1]); B.push(sd[i+2]);
     }
+    const tot = R.length;
     if(tot < 4) continue;
-    let top = 0;
-    bins.forEach(v => { if(v > top) top = v; });
-    sum += top/tot; n++;
+    const mid = arr => { const s = arr.slice().sort((p,q) => p-q); return s[s.length >> 1]; };
+    const mr = mid(R), mg = mid(G), mb = mid(B);
+    let flat = 0;
+    for(let i=0; i<tot; i++){
+      if(Math.abs(R[i]-mr) <= NOISE_TOL && Math.abs(G[i]-mg) <= NOISE_TOL &&
+         Math.abs(B[i]-mb) <= NOISE_TOL) flat++;
+    }
+    sum += flat/tot; n++;
   }
   return n ? sum/n : 0;
 }
@@ -880,6 +1218,424 @@ function snapGrid(img, pitch, box, lockCols){
   return out;
 }
 
+/* ════════════════════════════════════════════════
+   PIXEL REPAIR — deterministic, native resolution
+   Every function here reads and writes binary-alpha ImageData at the
+   sprite's true output resolution. No blur, no interpolation, no
+   fractional coordinates, no generative anything.
+   ════════════════════════════════════════════════ */
+
+/* clockwise from top-left */
+const RING = [[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0]];
+const ORTH = [[0,-1],[1,0],[0,1],[-1,0]];
+
+/** Connected-component labelling over a binary mask. */
+function labelComponents(mask, w, h, conn8){
+  const lab = new Int32Array(w*h).fill(-1);
+  const stack = new Int32Array(w*h);
+  const sizes = [];
+  let id = 0;
+  const nb = conn8 ? RING : ORTH;
+  for(let s=0; s<w*h; s++){
+    if(!mask[s] || lab[s] >= 0) continue;
+    let sp = 0, n = 0;
+    lab[s] = id; stack[sp++] = s;
+    while(sp > 0){
+      const k = stack[--sp]; n++;
+      const x = k % w, y = (k/w)|0;
+      for(let i=0; i<nb.length; i++){
+        const nx = x + nb[i][0], ny = y + nb[i][1];
+        if(nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const nk = ny*w + nx;
+        if(mask[nk] && lab[nk] < 0){ lab[nk] = id; stack[sp++] = nk; }
+      }
+    }
+    sizes.push(n); id++;
+  }
+  return {lab, sizes, count:id};
+}
+
+function opaqueMask(img){
+  const {width:w, height:h, data:d} = img;
+  const m = new Uint8Array(w*h);
+  for(let k=0; k<w*h; k++) m[k] = d[k*4+3] > 0 ? 1 : 0;
+  return m;
+}
+
+/** Most common opaque colour among the 8 neighbours of k. */
+function modalNeighbour(d, w, h, k, mask){
+  const x = k % w, y = (k/w)|0;
+  const tally = new Map();
+  for(let i=0; i<RING.length; i++){
+    const nx = x + RING[i][0], ny = y + RING[i][1];
+    if(nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+    const nk = ny*w + nx;
+    if(mask && !mask[nk]) continue;
+    if(d[nk*4+3] === 0) continue;
+    const key = (d[nk*4]<<16) | (d[nk*4+1]<<8) | d[nk*4+2];
+    tally.set(key, (tally.get(key) || 0) + 1);
+  }
+  let win = -1, wn = 0;
+  tally.forEach((n, key) => { if(n > wn){ wn = n; win = key; } });
+  return win;
+}
+
+/**
+ * CLEAN ISOLATED PIXELS.
+ * Two distinct kinds of garbage, judged separately:
+ *   1. alpha islands — opaque blobs of <= maxSize disconnected from the main
+ *      silhouette. Stray white/black specks the generator scattered outside
+ *      the character. Erased.
+ *   2. colour islands — blobs of <= maxSize sharing one exact colour, fully
+ *      enclosed by other opaque pixels, that disagree with everything around
+ *      them. Repainted with the modal surrounding colour rather than erased,
+ *      because punching a hole in the middle of a sprite is worse than the
+ *      speck was.
+ * The main component is never touched, so a deliberately detached item — a
+ * thrown weapon, a floating spark — survives as long as it is bigger than the
+ * strength setting.
+ */
+function cleanIsolated(img, maxSize, apply){
+  const {width:w, height:h, data:d} = img;
+  let n = 0;
+
+  /* 1 · alpha islands */
+  const mask = opaqueMask(img);
+  const {lab, sizes, count} = labelComponents(mask, w, h, true);
+  let main = -1, best = -1;
+  for(let i=0; i<count; i++) if(sizes[i] > best){ best = sizes[i]; main = i; }
+  const doomed = new Uint8Array(count);
+  for(let i=0; i<count; i++) if(i !== main && sizes[i] <= maxSize) doomed[i] = 1;
+  for(let k=0; k<w*h; k++){
+    const L = lab[k];
+    if(L < 0 || !doomed[L]) continue;
+    n++;
+    if(apply) d[k*4+3] = 0;
+  }
+  if(apply) for(let k=0; k<w*h; k++) mask[k] = d[k*4+3] > 0 ? 1 : 0;
+
+  /* 2 · colour islands inside the silhouette */
+  const seen = new Uint8Array(w*h);
+  const stack = new Int32Array(w*h);
+  const comp = new Int32Array(Math.max(16, maxSize*8));
+  for(let s=0; s<w*h; s++){
+    if(seen[s] || !mask[s]) continue;
+    const key0 = (d[s*4]<<16) | (d[s*4+1]<<8) | d[s*4+2];
+    let sp = 0, cn = 0, enclosed = true, overflow = false;
+    seen[s] = 1; stack[sp++] = s;
+    while(sp > 0){
+      const k = stack[--sp];
+      if(cn < comp.length) comp[cn] = k;
+      cn++;
+      if(cn > maxSize) overflow = true;
+      const x = k % w, y = (k/w)|0;
+      for(let i=0; i<RING.length; i++){
+        const nx = x + RING[i][0], ny = y + RING[i][1];
+        if(nx < 0 || ny < 0 || nx >= w || ny >= h){ enclosed = false; continue; }
+        const nk = ny*w + nx;
+        if(!mask[nk]){ enclosed = false; continue; }
+        const key = (d[nk*4]<<16) | (d[nk*4+1]<<8) | d[nk*4+2];
+        if(key !== key0) continue;
+        if(seen[nk]) continue;
+        seen[nk] = 1;
+        if(sp < stack.length) stack[sp++] = nk;
+      }
+    }
+    if(overflow || !enclosed || cn > maxSize) continue;
+    const rep = modalNeighbour(d, w, h, comp[0], mask);
+    if(rep < 0) continue;
+    n += cn;
+    if(apply) for(let i=0; i<cn && i<comp.length; i++){
+      const k = comp[i];
+      d[k*4] = (rep>>16)&255; d[k*4+1] = (rep>>8)&255; d[k*4+2] = rep&255;
+    }
+  }
+  return n;
+}
+
+/**
+ * FILL PINHOLES.
+ * Operates on connected components of transparent pixels, not on pixels.
+ * A component is only a pinhole when it is (a) enclosed — never reaching the
+ * canvas border — and (b) at most maxSize pixels. The gap between the legs
+ * runs off the bottom edge, so it reaches the border and is left alone. The
+ * space between an arm and the torso is enclosed but far larger than 3 px, so
+ * it is left alone. Only genuine specks get filled, with the modal colour of
+ * the ring around them.
+ */
+function fillPinholes(img, maxSize, apply){
+  const {width:w, height:h, data:d} = img;
+  const holes = new Uint8Array(w*h);
+  for(let k=0; k<w*h; k++) holes[k] = d[k*4+3] === 0 ? 1 : 0;
+  const {lab, sizes, count} = labelComponents(holes, w, h, false);
+  if(!count) return 0;
+
+  const openToBorder = new Uint8Array(count);
+  for(let x=0; x<w; x++){
+    if(lab[x] >= 0) openToBorder[lab[x]] = 1;
+    const k = (h-1)*w + x;
+    if(lab[k] >= 0) openToBorder[lab[k]] = 1;
+  }
+  for(let y=0; y<h; y++){
+    if(lab[y*w] >= 0) openToBorder[lab[y*w]] = 1;
+    const k = y*w + w-1;
+    if(lab[k] >= 0) openToBorder[lab[k]] = 1;
+  }
+
+  let n = 0;
+  for(let k=0; k<w*h; k++){
+    const L = lab[k];
+    if(L < 0 || openToBorder[L] || sizes[L] > maxSize) continue;
+    n++;
+    if(apply){
+      const rep = modalNeighbour(d, w, h, k, null);
+      if(rep >= 0){
+        d[k*4] = (rep>>16)&255; d[k*4+1] = (rep>>8)&255;
+        d[k*4+2] = rep&255; d[k*4+3] = 255;
+      }
+    }
+  }
+  return n;
+}
+
+/**
+ * EDGE CLEANUP.
+ * Simplifies accidental 1-pixel contour noise without touching intentional
+ * stair steps. Nothing is blurred, averaged or smoothed — pixels are either
+ * removed or added whole.
+ *
+ * A pixel is an outward SPIKE when its opaque 8-neighbours form exactly one
+ * contiguous run around the ring AND it has exactly one orthogonal opaque
+ * neighbour:
+ *   · a dangling nub on a flat edge has neighbours SW·S·SE — one run, one
+ *     orthogonal → removed.
+ *   · a pixel on a 1-px diagonal line has NW and SE — two runs on opposite
+ *     sides of the ring → kept, so stair steps survive.
+ *   · a rectangle corner has S and E — two orthogonal neighbours → kept, so
+ *     deliberate hard corners are not rounded off.
+ *   · the TIP of a diagonal run touches its chain only diagonally — zero
+ *     orthogonal neighbours → kept. Requiring exactly one is what stops two
+ *     high-strength passes from quietly eating a stair step from the end.
+ * The single-run test also guarantees removal cannot locally disconnect the
+ * silhouette.
+ *
+ * A transparent pixel is an inward NOTCH when enough orthogonal neighbours are
+ * opaque; it is filled with the modal colour of its ring.
+ */
+function edgeCleanup(img, level, apply){
+  if(!level) return 0;
+  const passes  = level >= 3 ? 2 : 1;
+  const maxRun  = level >= 2 ? 3 : 2;   /* how far a nub may stick out */
+  const notchMin= level >= 2 ? 3 : 4;   /* orthogonal neighbours to fill a notch */
+  const {width:w, height:h} = img;
+  let n = 0;
+
+  for(let p=0; p<passes; p++){
+    const d = img.data;
+    const op = opaqueMask(img);
+    const kill = [], fill = [];
+    const ring = new Uint8Array(8);
+    for(let y=0; y<h; y++) for(let x=0; x<w; x++){
+      const k = y*w + x;
+      let orth = 0, any = 0;
+      for(let i=0; i<8; i++){
+        const nx = x + RING[i][0], ny = y + RING[i][1];
+        const v = (nx<0||ny<0||nx>=w||ny>=h) ? 0 : op[ny*w+nx];
+        ring[i] = v;
+        if(v){ any++; if(i & 1) orth++; }   /* odd ring indices are orthogonal */
+      }
+      if(op[k]){
+        if(any === 8) continue;             /* interior */
+        if(orth !== 1) continue;            /* 0 = diagonal chain, 2+ = a real corner */
+        /* rotate to a gap so the wraparound run is not split in two */
+        let start = -1;
+        for(let i=0; i<8; i++) if(!ring[i]){ start = i; break; }
+        if(start < 0) continue;
+        let runs = 0, len = 0, longest = 0;
+        for(let i=0; i<8; i++){
+          if(ring[(start+i) % 8]){ len++; if(len > longest) longest = len; }
+          else { if(len) runs++; len = 0; }
+        }
+        if(len) runs++;
+        if(runs === 1 && longest <= maxRun) kill.push(k);
+      } else if(orth >= notchMin){
+        fill.push(k);
+      }
+    }
+    n += kill.length + fill.length;
+    if(!apply) break;
+    for(const k of fill){
+      const rep = modalNeighbour(d, w, h, k, null);
+      if(rep < 0) continue;
+      d[k*4] = (rep>>16)&255; d[k*4+1] = (rep>>8)&255;
+      d[k*4+2] = rep&255; d[k*4+3] = 255;
+    }
+    for(const k of kill) d[k*4+3] = 0;
+    if(!kill.length && !fill.length) break;
+  }
+  return n;
+}
+
+/**
+ * TRUE PIXEL OUTLINE.
+ * Built from the alpha mask by dilation and painted into real source pixels —
+ * no stroke, no shadow, no filter. One dilation pass per outline pixel, so a
+ * 1 px outline is exactly one native pixel and stays one native pixel at every
+ * export scale (8× export → 8 physical pixels).
+ */
+function addOutline(img, px, conn8, col){
+  if(!px) return 0;
+  const {width:w, height:h, data:d} = img;
+  const orig = opaqueMask(img);
+  let cur = orig;
+  const ink = new Uint8Array(w*h);
+  const nb = conn8 ? RING : ORTH;
+  for(let step=0; step<px; step++){
+    const next = new Uint8Array(cur);
+    for(let y=0; y<h; y++) for(let x=0; x<w; x++){
+      const k = y*w + x;
+      if(cur[k]) continue;
+      for(let i=0; i<nb.length; i++){
+        const nx = x + nb[i][0], ny = y + nb[i][1];
+        if(nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        if(cur[ny*w + nx]){ next[k] = 1; ink[k] = 1; break; }
+      }
+    }
+    cur = next;
+  }
+  let n = 0;
+  for(let k=0; k<w*h; k++){
+    if(!ink[k] || orig[k]) continue;
+    d[k*4] = col[0]; d[k*4+1] = col[1]; d[k*4+2] = col[2]; d[k*4+3] = 255;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * MERGE NEAR COLOURS.
+ * Runs across every frame at once so an animation cannot end up with three
+ * different "same" blues on three different frames. Colours are visited most
+ * frequent first, so the dominant shade anchors each cluster and the rare
+ * near-duplicates fold into it, never the other way round.
+ */
+function mergeNearColors(frames, tol){
+  if(tol <= 0) return 0;
+  const hist = new Map();
+  for(const im of frames){
+    const d = im.data;
+    for(let i=0; i<d.length; i+=4){
+      if(!d[i+3]) continue;
+      const k = (d[i]<<16) | (d[i+1]<<8) | d[i+2];
+      hist.set(k, (hist.get(k) || 0) + 1);
+    }
+  }
+  if(hist.size < 2) return hist.size;
+  const order = Array.from(hist.entries()).sort((a,b) => b[1] - a[1]);
+  const reps = [], map = new Map();
+  const t2 = tol*tol;
+  for(const [k, n] of order){
+    const r = (k>>16)&255, g = (k>>8)&255, b = k&255;
+    const lab = labOf(r,g,b);
+    let bi = -1, bd = Infinity;
+    for(let j=0; j<reps.length; j++){
+      const dd = labDist2(lab, reps[j].lab);
+      if(dd < bd){ bd = dd; bi = j; }
+    }
+    if(bi >= 0 && bd <= t2){
+      const R = reps[bi];
+      R.r += r*n; R.g += g*n; R.b += b*n; R.n += n;
+      map.set(k, bi);
+    } else {
+      reps.push({lab, r:r*n, g:g*n, b:b*n, n});
+      map.set(k, reps.length-1);
+    }
+  }
+  const cols = reps.map(R => [Math.round(R.r/R.n), Math.round(R.g/R.n), Math.round(R.b/R.n)]);
+  for(const im of frames){
+    const d = im.data;
+    for(let i=0; i<d.length; i+=4){
+      if(!d[i+3]) continue;
+      const c = cols[map.get((d[i]<<16) | (d[i+1]<<8) | d[i+2])];
+      d[i] = c[0]; d[i+1] = c[1]; d[i+2] = c[2];
+    }
+  }
+  return cols.length;
+}
+
+/**
+ * NARROW GAP DETECTION — silhouette readability, not semantics.
+ * Flags transparent pixels pinched between opaque pixels on opposite sides:
+ * a one-pixel channel between an arm and a torso, or between two legs about
+ * to merge. Groups of one are ignored as contour noise; anything longer is a
+ * place worth looking at by hand.
+ */
+function narrowGaps(img){
+  const {width:w, height:h} = img;
+  const op = opaqueMask(img);
+  const mark = new Uint8Array(w*h);
+  for(let y=0; y<h; y++) for(let x=0; x<w; x++){
+    const k = y*w + x;
+    if(op[k]) continue;
+    const hz = x > 0 && x < w-1 && op[k-1] && op[k+1];
+    const vt = y > 0 && y < h-1 && op[k-w] && op[k+w];
+    if(hz || vt) mark[k] = 1;
+  }
+  const {lab, sizes, count} = labelComponents(mark, w, h, true);
+  const keep = new Uint8Array(count);
+  let n = 0;
+  for(let i=0; i<count; i++) if(sizes[i] >= 2){ keep[i] = 1; n++; }
+  for(let k=0; k<w*h; k++) if(mark[k] && !keep[lab[k]]) mark[k] = 0;
+  return {count:n, mask:mark};
+}
+
+/** Distinct opaque colours, plus how many pairs are perceptually near-dupes. */
+function paletteStats(img){
+  const d = img.data;
+  const set = new Set();
+  for(let i=0; i<d.length; i+=4) if(d[i+3]) set.add((d[i]<<16)|(d[i+1]<<8)|d[i+2]);
+  const cols = Array.from(set).map(k => labOf((k>>16)&255, (k>>8)&255, k&255));
+  let dupe = 0;
+  if(cols.length <= 400){
+    for(let i=0; i<cols.length; i++) for(let j=i+1; j<cols.length; j++)
+      if(labDist2(cols[i], cols[j]) < 9) dupe++;   /* < 3 OKLab units apart */
+  }
+  return {count:set.size, dupe};
+}
+
+/**
+ * PIXEL INTEGRITY.
+ * Not a standard, and not pretending to be one: it counts exactly the defects
+ * this tool knows how to repair, weights them by how much they hurt a sprite
+ * in an actual game, and subtracts. Useful for spotting that a frame still
+ * needs attention; meaningless as an absolute number.
+ */
+function integrity(m){
+  let p = 0;
+  /* Fuzz is an EDGE defect, so it is scored against the perimeter, not the
+     area — otherwise the same fuzzy outline reads as fine on a big sprite and
+     catastrophic on a small one. Only genuinely undecided alpha counts: a
+     clean 2:1 downsample of hard-edged art produces exact half-alpha on the
+     boundary and that is not a defect. */
+  /* Weighted for the common case of deliberately targeting a canvas smaller
+     than the native art: that resampling makes fractional edge coverage
+     unavoidable, and hard alpha resolves it. It is worth flagging, not worth
+     condemning a sprite over. */
+  p += Math.min(14, (m.amb / Math.max(1, m.perimeter)) * 18);
+  p += Math.min(15, m.iso * 1.2);                  /* leftover specks */
+  p += Math.min(12, m.pin * 3);                    /* leftover pinholes */
+  p += Math.min(10, m.gaps * 1.4);                 /* silhouette about to merge */
+  p += Math.min(12, m.dupe * 0.8);                 /* near-duplicate palette */
+  if(m.colors > 64) p += Math.min(12, (m.colors - 64) / 6);
+  p += Math.min(10, m.offGrid);                    /* fractional / low-confidence grid */
+  const score = clamp(100 - p, 0, 100);
+  const label = score >= 97 ? 'EXCELLENT' : score >= 90 ? 'CLEAN'
+              : score >= 75 ? 'NEEDS REPAIR' : 'POOR';
+  const cls   = score >= 97 ? 's-ex' : score >= 90 ? 's-cl'
+              : score >= 75 ? 's-nr' : 's-po';
+  return {score, label, cls};
+}
+
 /* ---- geometry ---- */
 function bboxOf(data, w, h, x0, y0, cw, ch, cut){
   let minX=1e9, minY=1e9, maxX=-1, maxY=-1;
@@ -895,6 +1651,89 @@ function bboxOf(data, w, h, x0, y0, cw, ch, cut){
   }
   if(maxX < 0) return null;
   return {x:minX, y:minY, w:maxX-minX+1, h:maxY-minY+1};
+}
+
+/**
+ * Bounding box of the art that actually matters.
+ * The grid box decides where every block boundary falls, so one stray speck in
+ * a corner — and AI output is full of them — drags the box out and shifts the
+ * whole reconstruction off the real grid. Components far smaller than the main
+ * silhouette are not allowed to define the box. They are not deleted here;
+ * they are simply not consulted about where the grid is.
+ */
+function contentBox(img, cut){
+  const {width:w, height:h, data:d} = img;
+  /* Label on a coarse grid — a 1500×3000 upload does not need 4.5M labels to
+     answer "which blobs are big". The exact box is measured at full res after. */
+  const step = Math.max(1, Math.ceil(Math.sqrt(w*h/400000)));
+  const mw = Math.ceil(w/step), mh = Math.ceil(h/step);
+  const m = new Uint8Array(mw*mh);
+  for(let y=0; y<mh; y++) for(let x=0; x<mw; x++){
+    const sy = Math.min(h-1, y*step), sx = Math.min(w-1, x*step);
+    m[y*mw + x] = d[(sy*w + sx)*4+3] >= cut ? 1 : 0;
+  }
+  const {lab, sizes, count} = labelComponents(m, mw, mh, true);
+  if(!count) return null;
+  let big = 0;
+  for(let i=0; i<count; i++) if(sizes[i] > big) big = sizes[i];
+  const keep = new Uint8Array(count);
+  for(let i=0; i<count; i++) keep[i] = sizes[i] >= Math.max(2, big*0.005) ? 1 : 0;
+
+  let minX=1e9, minY=1e9, maxX=-1, maxY=-1;
+  for(let y=0; y<h; y++) for(let x=0; x<w; x++){
+    if(d[(y*w + x)*4+3] < cut) continue;
+    const L = lab[Math.min(mh-1, (y/step)|0)*mw + Math.min(mw-1, (x/step)|0)];
+    if(L < 0 || !keep[L]) continue;
+    if(x<minX) minX=x; if(x>maxX) maxX=x;
+    if(y<minY) minY=y; if(y>maxY) maxY=y;
+  }
+  if(maxX < 0) return null;
+  return {x:minX, y:minY, w:maxX-minX+1, h:maxY-minY+1};
+}
+
+/**
+ * A copy of the pixel buffer with negligible components made transparent, for
+ * MEASUREMENT ONLY — the sprite itself is untouched. Used so stray specks
+ * cannot decide how the character is framed. The threshold is relative to the
+ * biggest component, so a genuinely detached element (a thrown weapon, a
+ * muzzle flash) is far above it and still counts.
+ */
+function withoutSpecks(img, cut){
+  const {width:w, height:h, data:src} = img;
+  const mask = new Uint8Array(w*h);
+  for(let k=0; k<w*h; k++) mask[k] = src[k*4+3] >= cut ? 1 : 0;
+  const {lab, sizes, count} = labelComponents(mask, w, h, true);
+  if(count < 2) return src;
+  let big = 0;
+  for(let i=0; i<count; i++) if(sizes[i] > big) big = sizes[i];
+  const cutoff = Math.max(2, big*0.005);
+  let drop = 0;
+  for(let i=0; i<count; i++) if(sizes[i] < cutoff) drop++;
+  if(!drop) return src;
+  const out = new Uint8ClampedArray(src);
+  for(let k=0; k<w*h; k++){
+    const L = lab[k];
+    if(L >= 0 && sizes[L] < cutoff) out[k*4+3] = 0;
+  }
+  return out;
+}
+
+/** Per-frame content boxes in one pass over the image, rather than one full
+ *  scan per frame. Used to line the SOURCE view up with the REPAIRED view. */
+function frameBoxes(img, frames, cut){
+  const {width:w, height:h, data:d} = img;
+  const fw = w/frames;
+  const out = [];
+  for(let f=0; f<frames; f++) out.push({x:1e9, y:1e9, X:-1, Y:-1});
+  for(let y=0; y<h; y++) for(let x=0; x<w; x++){
+    if(d[(y*w + x)*4+3] < cut) continue;
+    const b = out[Math.min(frames-1, (x/fw)|0)];
+    if(x<b.x) b.x=x; if(x>b.X) b.X=x;
+    if(y<b.y) b.y=y; if(y>b.Y) b.Y=y;
+  }
+  return out.map((b, f) => b.X < 0
+    ? {x:f*fw, y:0, w:fw, h}
+    : {x:b.x, y:b.y, w:b.X-b.x+1, h:b.Y-b.y+1});
 }
 
 /** Horizontal centre of the lowest 15% of the silhouette — the feet,
@@ -913,15 +1752,21 @@ function footCentre(data, w, h, x0, y0, bb, cut){
   return (lo+hi+1)/2;
 }
 
-/* ---- build one animation ---- */
+/* ════════════════════════════════════════════════
+   BUILD ONE ANIMATION
+   raw (never touched) → keyed → grid-snapped → src → repaired output
+   ════════════════════════════════════════════════ */
 function analyse(a){
   const c = makeCanvas(a.el.width, a.el.height);
   const x = c.getContext('2d', {willReadFrequently:true});
   x.drawImage(a.el, 0, 0);
   a.raw = x.getImageData(0, 0, c.width, c.height);
   a.hadAlpha = hasAlpha(a.raw);
-  a.key = !a.hadAlpha;   // fully opaque source -> it needs keying
+  a.keyBg = !a.hadAlpha;     // fully opaque source -> it needs keying
   a.snap = true;
+  a.edits = new Map();       // frame index -> Map(pixel index -> [r,g,b,a])
+  a.editVer = 0;
+  a.editSize = '';
   prep(a);
 }
 
@@ -929,15 +1774,19 @@ function analyse(a){
 function prep(a){
   const img = new ImageData(new Uint8ClampedArray(a.raw.data), a.raw.width, a.raw.height);
   a.pockets = 0;
-  if(a.key){
+  if(a.keyBg){
     keyOut(img, S.keyTol);
     if(S.pockets) a.pockets = keyPockets(img, S.keyTol, S.pocketAspect, 0.95);
   }
 
+  /* keyed, pre-snap content boxes — the anchor the SOURCE view lines up on */
+  a.rawBoxes = frameBoxes(img, a.frames, 1);
+
   a.pitch = 0; a.native = null;
   let work = img;
   if(a.snap){
-    const bb = bboxOf(img.data, img.width, img.height, 0, 0, img.width, img.height, 1)
+    const bb = contentBox(img, 1)
+            || bboxOf(img.data, img.width, img.height, 0, 0, img.width, img.height, 1)
             || {x:0, y:0, w:img.width, h:img.height};
     const box = {x0:bb.x, y0:bb.y, cw:bb.w, ch:bb.h};
     const forced = S.pitch > 0;
@@ -971,13 +1820,18 @@ function prep(a){
 }
 
 function measure(a){
-  const d = a.src.data, W = a.src.width, H = a.src.height;
+  const W = a.src.width, H = a.src.height;
+  /* Frame on the art, not on the litter. One leftover speck in a corner would
+     otherwise stretch the bounding box, shrink the whole character to fit, and
+     push it off centre — for a pixel the cleanup is about to delete anyway.
+     Skipped on very large un-snapped sources, where labelling every pixel on
+     each alpha-cutoff change would cost more than it is worth. */
+  const d = (W*H <= 1500000)
+    ? withoutSpecks(a.src, S.alpha)
+    : a.src.data;
   a.cellW = Math.round(W / a.frames);
   a.cellH = H;
   a.bb = []; a.foot = [];
-  let soft = 0;
-  for(let i=3; i<d.length; i+=4) if(d[i] > 0 && d[i] < 255) soft++;
-  a.soft = soft;
   for(let f=0; f<a.frames; f++){
     const bb = bboxOf(d, W, H, f*a.cellW, 0, a.cellW, a.cellH, S.alpha);
     a.bb.push(bb);
@@ -990,50 +1844,87 @@ function measure(a){
   a.out = null;
 }
 
-/** source → placed → downsampled → hard alpha → palette */
+/**
+ * source → placed on the output canvas → downsampled → hard alpha
+ *        → artifact repair → colour merge → palette → edge cleanup
+ *        → true pixel outline → manual edit layer
+ *
+ * Always rebuilt from a.src and the current settings. Nothing is ever fed
+ * back into itself, so repeated setting changes cannot compound degradation.
+ */
 function render(a){
-  if(a.out && a.key === keyOf() + '~' + (a.free ? 1 : 0)) return a.out;
-  const N = S.target;
-  const sq = Math.max(a.cellW, a.cellH);
-  const work = makeCanvas(sq, sq);
-  const wx = work.getContext('2d', {willReadFrequently:true});
-  const frames = [];
+  const rk = keyOf(a);
+  if(a.out && a.rkey === rk) return a.out;
 
-  const single = a.frames === 1 && a.cellW !== a.cellH;
-  const outW = single ? (a.cellW >= a.cellH ? N : Math.max(1, Math.round(N*a.cellW/a.cellH))) : N;
-  const outH = single ? (a.cellH >  a.cellW ? N : Math.max(1, Math.round(N*a.cellH/a.cellW))) : N;
-
+  const outW = S.outW, outH = S.outH;
+  const pad = S.outline;                       /* room for the outline */
+  const availW = Math.max(1, outW - 2*pad);
+  const availH = Math.max(1, outH - 2*pad - S.floor);
   const doAlign = S.align && !a.free;
 
-  // uniform scale for the whole animation, so proportions stay locked
-  let k = 1;
-  if(doAlign && S.matchH && a.medianH > 0){
-    k = (S.contentH * sq / N) / a.medianH;
-  }
+  /* one uniform scale for the whole animation, so proportions stay locked
+     and the character does not breathe between frames */
+  let maxW = 1, maxH = 1;
+  a.bb.forEach(b => { if(b){ if(b.w > maxW) maxW = b.w; if(b.h > maxH) maxH = b.h; } });
+  let k = (doAlign && S.matchH && a.medianH > 0)
+        ? S.contentH / a.medianH
+        : Math.min(availW/maxW, availH/maxH);
+  /* Never a fractional upscale — that is exactly the fake-pixel-grid problem
+     this tool exists to undo. Above 1× the scale snaps to a whole number. */
+  if(k > 1) k = Math.floor(k);
+  if(k * maxW > availW || k * maxH > availH) k = Math.min(k, Math.min(availW/maxW, availH/maxH));
+
+  /* Supersample the placement so the box filter has real samples to average.
+     Nearest-neighbour replication into the work canvas, then an alpha-weighted
+     box average down — never bilinear, never bicubic. */
+  let ss = k >= 1 ? 1 : Math.ceil(3/Math.max(k, 0.02));
+  ss = clamp(ss, 1, Math.max(1, Math.min(8, Math.floor(2048/Math.max(outW, outH)))));
+  const work = makeCanvas(outW*ss, outH*ss);
+  const wx = work.getContext('2d', {willReadFrequently:true});
+  wx.imageSmoothingEnabled = false;
+
+  const frames = [];
+  let softTotal = 0, ambTotal = 0;
+  const softPer = [], ambPer = [];
 
   for(let f=0; f<a.frames; f++){
     wx.clearRect(0, 0, work.width, work.height);
     const bb = a.bb[f];
     if(bb){
-      if(doAlign && !single){
-        const floorSrc = S.floor * sq / N;
-        const dh = bb.h * k, dw = bb.w * k;
-        const dy = sq - floorSrc - dh;
-        const anchorX = S.anchor === 'feet' ? (a.foot[f] - bb.x) : bb.w/2;
-        const dx = sq/2 - anchorX * k;
-        wx.drawImage(a.canvas, f*a.cellW + bb.x, bb.y, bb.w, bb.h, dx, dy, dw, dh);
-      } else if(single){
-        wx.drawImage(a.canvas, 0, 0, a.cellW, a.cellH, 0, 0, a.cellW, a.cellH);
+      const dw = Math.max(1, Math.round(bb.w * k));
+      const dh = Math.max(1, Math.round(bb.h * k));
+      const anchorX = S.anchor === 'feet' ? (a.foot[f] - bb.x) : bb.w/2;
+      let dx = Math.round(outW/2 - anchorX * k);
+      let dy;
+      if(doAlign){
+        dy = outH - pad - S.floor - dh;
       } else {
-        wx.drawImage(a.canvas, f*a.cellW, 0, a.cellW, a.cellH,
-                     (sq - a.cellW)/2, sq - a.cellH, a.cellW, a.cellH);
+        /* keep each frame's own vertical offset so baked-in drift stays visible */
+        const gap = Math.max(0, a.cellH - (bb.y + bb.h));
+        dy = outH - pad - S.floor - Math.round(gap * k) - dh;
       }
+      dx = clamp(dx, pad, Math.max(pad, outW - pad - dw));
+      dy = clamp(dy, pad, Math.max(pad, outH - pad - dh));
+      wx.drawImage(a.canvas,
+        f*a.cellW + bb.x, bb.y, bb.w, bb.h,
+        dx*ss, dy*ss, dw*ss, dh*ss);
     }
-    const sw = single ? a.cellW : sq, sh = single ? a.cellH : sq;
-    const img = boxDown(wx.getImageData(0, 0, sw, sh), sw, sh, outW, outH);
+    let img = wx.getImageData(0, 0, work.width, work.height);
+    if(ss > 1) img = boxDown(img, work.width, work.height, outW, outH);
+    const sc = countSoft(img);
+    softTotal += sc.soft; ambTotal += sc.amb;
+    softPer.push(sc.soft); ambPer.push(sc.amb);
     hardAlpha(img, S.alpha);
     frames.push(img);
   }
+
+  /* --- per-frame artifact repair, before any colour decision --- */
+  let isoFixed = 0, pinFixed = 0;
+  if(S.iso) frames.forEach(f => { isoFixed += cleanIsolated(f, S.isoMax, true); });
+  if(S.pin) frames.forEach(f => { pinFixed += fillPinholes(f, S.pinMax, true); });
+
+  /* --- colour, decided across the whole animation at once --- */
+  if(S.merge) mergeNearColors(frames, S.mergeTol);
 
   if(S.palMode === 'quantize'){
     const pal = medianCut(collect(frames, 12000), S.quantN);
@@ -1046,13 +1937,83 @@ function render(a){
     a.pal = null;
   }
 
-  a.out = {frames, w:outW, h:outH, cv: frames.map(imgToCanvas)};
-  a.key = keyOf() + '~' + (a.free ? 1 : 0);
+  /* --- silhouette --- */
+  let edgeFixed = 0;
+  if(S.edge) frames.forEach(f => { edgeFixed += edgeCleanup(f, S.edge, true); });
+
+  /* --- diagnostics, measured on the repaired sprite BEFORE the outline is
+         added, so the outline's own ring does not read as narrow gaps.
+         Measured for every frame here rather than for the current one, so
+         stepping or playing an animation never re-runs the pipeline. --- */
+  const offGrid = a.snap
+    ? (a.pitch
+        ? (Math.abs(a.pitch - Math.round(a.pitch)) > 0.08 ? 3 : 0) + (a.conf < 0.7 ? 4*(0.7-a.conf)/0.7 : 0)
+        : (a.rejected ? 0 : 4))
+    : 0;
+  const diags = frames.map((cur, f) => {
+    const gaps = narrowGaps(cur);
+    const stats = paletteStats(cur);
+    let opaque = 0;
+    const d = cur.data;
+    for(let i=3; i<d.length; i+=4) if(d[i]) opaque++;
+    const D = {
+      soft: softPer[f] || 0,
+      amb:  ambPer[f] || 0,
+      perimeter: perimeterOf(cur),
+      /* Probe at the strength the user actually asked for. Probing at max
+         strength would report a 3-px island as "left" when the setting is
+         1–2 px, i.e. penalise them for a deliberate choice. */
+      iso:  cleanIsolated(cur, S.iso ? S.isoMax : 3, false),
+      pin:  fillPinholes(cur, S.pin ? S.pinMax : 3, false),
+      gaps: gaps.count,
+      gapMask: gaps.mask,
+      colors: stats.count,
+      dupe: stats.dupe,
+      opaque, offGrid,
+      fixed: {iso:isoFixed, pin:pinFixed, edge:edgeFixed}
+    };
+    D.integrity = integrity(D);
+    return D;
+  });
+
+  /* --- true pixel outline, painted from the alpha mask --- */
+  if(S.outline) frames.forEach(f => addOutline(f, S.outline, S.outlineConn8, S.outlineCol));
+
+  /* --- manual edit layer: an explicit overlay on top of the auto repair --- */
+  const base = frames.map(cloneImg);
+  const sizeKey = outW + 'x' + outH;
+  let editCount = 0;
+  if(a.edits && a.edits.size && a.editSize === sizeKey){
+    a.edits.forEach((m, f) => {
+      if(f >= frames.length) return;
+      const d = frames[f].data;
+      m.forEach((v, idx) => {
+        d[idx*4] = v[0]; d[idx*4+1] = v[1]; d[idx*4+2] = v[2]; d[idx*4+3] = v[3];
+        editCount++;
+      });
+    });
+  }
+  const stale = !!(a.edits && a.edits.size && a.editSize !== sizeKey);
+  diags.forEach(D => { D.edits = editCount; D.editsStale = stale; });
+
+  a.out = {frames, base, w:outW, h:outH, cv: frames.map(imgToCanvas), diags};
+  /* `.diag` follows the selected frame without being part of the cache key —
+     that is what keeps playback from re-running the whole repair every tick. */
+  Object.defineProperty(a.out, 'diag', {
+    get(){ return diags[clamp(S.frame, 0, diags.length-1)] || diags[0]; }
+  });
+  a.rkey = rk;
   return a.out;
 }
 
-const keyOf = () => [S.target,S.alpha,S.align,S.anchor,S.floor,S.matchH,S.contentH,
-  S.palMode,S.quantN,S.palette.map(c=>c.join()).join('|')].join('~');
+const keyOf = a => [
+  S.outW, S.outH, S.alpha, S.align, S.anchor, S.floor, S.matchH, S.contentH,
+  S.palMode, S.quantN, S.palette.map(c => c.join()).join('|'),
+  S.iso, S.isoMax, S.pin, S.pinMax, S.edge,
+  S.outline, S.outlineConn8, S.outlineCol.join(),
+  S.merge, S.mergeTol,
+  a.free ? 1 : 0, a.editVer || 0
+].join('~');
 
 function invalidate(){ S.anims.forEach(a => { a.out = null; }); }
 function remeasure(){ S.anims.forEach(measure); }
@@ -1066,11 +2027,48 @@ function imgToCanvas(img){
   return c;
 }
 
+function checker(g, w, h){
+  const t = 8;
+  for(let y=0; y<h; y+=t) for(let x=0; x<w; x+=t){
+    g.fillStyle = ((x/t + y/t) % 2) ? '#0b0b0d' : '#121216';
+    g.fillRect(x, y, t, t);
+  }
+}
+
+/**
+ * The untouched upload, scaled and positioned so its silhouette lands exactly
+ * where the repaired silhouette lands. Merely fitting it to the canvas would
+ * put the two characters at different sizes and offsets, and a comparison view
+ * you have to mentally re-register is not a comparison view.
+ */
+function drawSourceFrame(g, a, f, W, H, out){
+  const fw = a.el.width / a.frames;
+  g.imageSmoothingEnabled = false;
+  const sb = a.rawBoxes && a.rawBoxes[f];
+  const ob = out && bboxOf(out.frames[f].data, out.w, out.h, 0, 0, out.w, out.h, 128);
+  if(!sb || !ob || !sb.h){
+    const k = Math.min(W/fw, H/a.el.height);
+    g.drawImage(a.el, f*fw, 0, fw, a.el.height, (W-fw*k)/2, H-a.el.height*k, fw*k, a.el.height*k);
+    return;
+  }
+  const Z = W / out.w;                       /* on-screen px per output px */
+  const k = (ob.h / sb.h) * Z;               /* on-screen px per source px */
+  g.drawImage(a.el,
+    f*fw, 0, fw, a.el.height,
+    ob.x*Z - (sb.x - f*fw)*k, ob.y*Z - sb.y*k,
+    fw*k, a.el.height*k);
+}
+
 function draw(){
   const a = active();
   const cv = $('#view'), wrap = $('#viewWrap');
-  if(!a){ cv.classList.add('hide'); $('#empty').classList.remove('hide'); $('#hud').classList.add('hide'); return; }
+  if(!a){
+    cv.classList.add('hide'); $('#empty').classList.remove('hide');
+    $('#hud').classList.add('hide'); $('#splitLabel').classList.add('hide');
+    return;
+  }
   cv.classList.remove('hide'); $('#empty').classList.add('hide'); $('#hud').classList.remove('hide');
+  $('#splitLabel').classList.toggle('hide', S.view !== 'split');
 
   const out = render(a);
   const f = clamp(S.frame, 0, out.frames.length-1);
@@ -1091,13 +2089,29 @@ function draw(){
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
 
-  // checker
-  const t = 8;
-  for(let y=0; y<cv.height; y+=t) for(let x=0; x<cv.width; x+=t){
-    g.fillStyle = ((x/t + y/t) % 2) ? '#0b0b0d' : '#121216';
-    g.fillRect(x, y, t, t);
+  checker(g, cv.width, cv.height);
+
+  if(S.view === 'source'){
+    drawSourceFrame(g, a, f, cv.width, cv.height, out);
+  } else if(S.view === 'split'){
+    const sx = Math.round(cv.width * S.split);
+    g.save(); g.beginPath(); g.rect(0, 0, sx, cv.height); g.clip();
+    drawSourceFrame(g, a, f, cv.width, cv.height, out); g.restore();
+    g.save(); g.beginPath(); g.rect(sx, 0, cv.width-sx, cv.height); g.clip();
+    g.drawImage(out.cv[f], 0, 0, cv.width, cv.height); g.restore();
+    g.strokeStyle = 'rgba(110,164,196,.9)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(sx+.5, 0); g.lineTo(sx+.5, cv.height); g.stroke();
+  } else {
+    g.drawImage(out.cv[f], 0, 0, cv.width, cv.height);
   }
-  g.drawImage(out.cv[f], 0, 0, cv.width, cv.height);
+
+  // narrow-gap overlay
+  if(S.showGaps && out.diag.gapMask && S.view !== 'source'){
+    const m = out.diag.gapMask;
+    g.fillStyle = 'rgba(196,136,110,.55)';
+    for(let y=0; y<out.h; y++) for(let x=0; x<out.w; x++)
+      if(m[y*out.w+x]) g.fillRect(x*Z, y*Z, Z, Z);
+  }
 
   // pixel grid
   if(S.showGrid && Z >= 4){
@@ -1113,15 +2127,6 @@ function draw(){
     const baseY = (out.h - S.floor) * Z;
     g.strokeStyle = 'rgba(110,164,196,.85)'; g.lineWidth = 1;
     g.beginPath(); g.moveTo(0, baseY-.5); g.lineTo(cv.width, baseY-.5); g.stroke();
-    if(!S.align || a.free){
-      g.strokeStyle = 'rgba(196,136,110,.55)';
-      const sq = Math.max(a.cellW, a.cellH);
-      a.bb.forEach(bb => {
-        if(!bb) return;
-        const y = Math.round((bb.y + bb.h) * out.h / sq) * Z;
-        g.beginPath(); g.moveTo(0, y-.5); g.lineTo(cv.width, y-.5); g.stroke();
-      });
-    }
   }
 
   // hud
@@ -1135,24 +2140,49 @@ function draw(){
 }
 
 function readout(a, out){
-  const f = out.frames[S.frame];
-  const set = new Set();
-  const d = f.data;
-  for(let i=0; i<d.length; i+=4) if(d[i+3]) set.add((d[i]<<16)|(d[i+1]<<8)|d[i+2]);
-  const bb = bboxOf(d, f.width, f.height, 0, 0, f.width, f.height, 128);
-  $('#roPitch').textContent = a.pitch ? a.pitch.toFixed(2) + ' px' : 'not snapped';
-  $('#roSrc').textContent = a.cellW + '×' + a.cellH;
-  $('#roOut').textContent = out.w + '×' + out.h;
+  const D = out.diag;
+
+  /* integrity */
+  const I = D.integrity;
+  const sv = $('#scoreVal'), sl = $('#scoreLbl'), sb = $('#scoreBar');
+  sv.textContent = I.score.toFixed(1) + '%';
+  sv.className = I.cls;
+  sl.textContent = I.label;
+  sl.className = I.cls;
+  sb.style.width = I.score + '%';
+  sb.className = I.cls;
+
+  const setRO = (sel, txt, cls) => { const e = $(sel); e.textContent = txt; e.className = cls || ''; };
+  setRO('#roSoft', D.soft ? D.soft.toLocaleString() + ' → 0' : 'none', 'good');
+  setRO('#roIso',  D.iso  ? D.iso + ' left' : (D.fixed.iso ? D.fixed.iso + ' removed' : 'none'),
+        D.iso ? 'hot' : 'good');
+  setRO('#roPin',  D.pin  ? D.pin + ' left' : (D.fixed.pin ? D.fixed.pin + ' filled' : 'none'),
+        D.pin ? 'hot' : 'good');
+  setRO('#roGaps', D.gaps || 'none', D.gaps ? 'warn' : 'good');
+  setRO('#roDupe', D.dupe || 'none', D.dupe > 4 ? 'warn' : 'good');
+
+  $('#roPitch').textContent  = a.pitch ? a.pitch.toFixed(2) + ' px' : 'not snapped';
+  $('#roNative').textContent = a.native ? Math.round(a.native.w/a.frames) + '×' + a.native.h : '—';
+  $('#roSrc').textContent    = a.cellW + '×' + a.cellH;
+  $('#roOut').textContent    = out.w + '×' + out.h;
   $('#roFrames').textContent = a.frames;
-  $('#roColors').textContent = set.size;
+  $('#roColors').textContent = D.colors;
+  const bb = bboxOf(out.frames[S.frame].data, out.w, out.h, 0, 0, out.w, out.h, 128);
   $('#roH').textContent = bb ? bb.h + ' px' : '—';
   const dEl = $('#roDrift');
   const on = S.align && !a.free;
   dEl.textContent = on ? 'locked' : a.drift + ' px';
   dEl.className = on ? 'good' : (a.drift > 2 ? 'hot' : '');
-  const sEl = $('#roSoft');
-  sEl.textContent = a.soft ? a.soft.toLocaleString() + ' \u2192 0' : 'none in source';
-  sEl.className = 'good';
+  const eEl = $('#roEdits');
+  eEl.textContent = D.editsStale ? 'cleared · size changed' : (D.edits ? D.edits + ' px' : 'none');
+  eEl.className = D.editsStale ? 'warn' : (D.edits ? 'warn' : '');
+  $('#editBadge').textContent = D.edits ? D.edits + ' px manually edited' : '';
+
+  /* export labels */
+  $('#lbl1x').textContent  = out.w + '×' + out.h;
+  $('#lbl4x').textContent  = (out.w*4) + '×' + (out.h*4);
+  $('#lbl8x').textContent  = (out.w*8) + '×' + (out.h*8);
+  $('#lbl16x').textContent = (out.w*16) + '×' + (out.h*16);
   $('#expNote').innerHTML = 'Strip exports at <b>' + (out.w*a.frames*S.scale) + '×' + (out.h*S.scale) + '</b> px.';
 }
 
@@ -1162,7 +2192,8 @@ function drawStrip(){
   const out = render(a);
   out.frames.forEach((img, i) => {
     const d = document.createElement('div');
-    d.className = 'cell' + (i === S.frame ? ' on' : '');
+    d.className = 'cell' + (i === S.frame ? ' on' : '') +
+      (a.edits && a.edits.get(i) && a.edits.get(i).size ? ' edited' : '');
     const c = makeCanvas(44, 44);
     const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
     const k = Math.min(44/out.w, 44/out.h);
@@ -1189,6 +2220,108 @@ function drawPalette(){
 const active = () => S.anims.find(a => a.id === S.active) || null;
 
 /* ════════════════════════════════════════════════
+   MAKE PIXEL PERFECT
+   Sane defaults for a character sprite, applied in one shot. Every setting
+   it touches stays user-adjustable afterwards — it moves the sliders, it
+   does not lock them.
+   ════════════════════════════════════════════════ */
+function makePixelPerfect(){
+  const a = active(); if(!a) return;
+
+  /* 1 · key the background when the upload has no alpha at all */
+  if(!a.hadAlpha) a.keyBg = true;
+  S.pockets = true;
+
+  /* 2 · detect the source block grid and 3 · rebuild one pixel per block */
+  a.snap = true;
+  S.pitch = 0;                       /* auto-detect */
+  if(S.snapColors < 2) S.snapColors = 32;
+  prep(a);
+
+  /* 9 · silhouette  10 · true pixel outline — decided before sizing, because
+     the canvas has to hold them */
+  S.edge = 1;
+  S.outline = 1; S.outlineConn8 = true;
+
+  /* Size the output canvas to the grid we actually found, PLUS the room the
+     outline and floor offset need. Sizing it to the bare native size looks
+     right and is the one mistake that ruins the whole point: the art no
+     longer fits, everything is scaled by 0.95, and one output pixel stops
+     being one source block — which is the fake grid, reintroduced. */
+  if(a.native){
+    const nw = Math.round(a.native.w / a.frames), nh = a.native.h;
+    S.outW = clamp(nw + 2*S.outline, 8, 512);
+    S.outH = clamp(nh + 2*S.outline + S.floor, 8, 512);
+  }
+
+  /* 4 · hard alpha  5 · isolated pixels  6 · pinholes */
+  S.alpha = 128;
+  S.iso = true;  S.isoMax = 2;
+  S.pin = true;  S.pinMax = 2;
+
+  /* 7 · normalize near-identical colours  8 · quantize */
+  S.merge = true; S.mergeTol = 6;
+  S.palMode = S.palMode === 'locked' && S.palette.length ? 'locked' : 'quantize';
+  if(S.palMode === 'quantize') S.quantN = 32;
+
+  syncUI();
+  remeasure(); invalidate(); refreshAll();
+
+  const b = $('#btnPerfect');
+  const html = b.innerHTML;
+  b.innerHTML = 'Repaired<small>' + S.outW + ' × ' + S.outH + ' · adjust anything below</small>';
+  setTimeout(() => { b.innerHTML = html; }, 2200);
+}
+
+/** Push every S value back into the controls. */
+function syncUI(){
+  const a = active();
+  $('#outW').value = S.outW; $('#outH').value = S.outH;
+  $('#sizePreset').value = presetFor(S.outW, S.outH);
+  $('#togAspect').classList.toggle('on', S.aspectLock);
+  $('#alpha').value = S.alpha; $('#alphaVal').textContent = S.alpha;
+  $('#keyTol').value = S.keyTol; $('#keyVal').textContent = S.keyTol;
+  $('#pitch').value = S.pitch || '';
+  $('#snapColors').value = S.snapColors;
+  $('#pocketAspect').value = S.pocketAspect;
+  $('#togPockets').classList.toggle('on', S.pockets);
+  if(a){
+    $('#togKey').classList.toggle('on', !!a.keyBg);
+    $('#togSnap').classList.toggle('on', !!a.snap);
+  }
+  $('#togIso').classList.toggle('on', S.iso);
+  $('#togPin').classList.toggle('on', S.pin);
+  $('#togMerge').classList.toggle('on', S.merge);
+  segSet('#isoStrength', S.isoMax);
+  segSet('#pinStrength', S.pinMax);
+  segSet('#edgeLevel', S.edge);
+  segSet('#outlineN', S.outline);
+  $('#outlineConn').value = S.outlineConn8 ? '8' : '4';
+  $('#outlineCol').value = hex(S.outlineCol);
+  $('#outlineHex').value = hex(S.outlineCol);
+  $('#mergeTol').value = S.mergeTol; $('#mergeVal').textContent = S.mergeTol;
+  segSet('#palMode', S.palMode);
+  segSet('#palPreset', S.palMode === 'off' ? 0 : S.quantN);
+  $('#quantN').value = S.quantN;
+  $('#rowQuant').classList.toggle('hide', S.palMode === 'off');
+  $('#togAlign').classList.toggle('on', S.align);
+  $('#togMatch').classList.toggle('on', S.matchH);
+  $('#rowHeight').classList.toggle('hide', !S.matchH);
+  $('#floor').value = S.floor;
+  $('#contentH').value = S.contentH;
+  $('#anchor').value = S.anchor;
+  segSet('#viewMode', S.view);
+  $('#togGaps').classList.toggle('on', S.showGaps);
+}
+function segSet(sel, v){
+  $$(sel + ' button').forEach(b => b.classList.toggle('on', b.dataset.v === String(v)));
+}
+function presetFor(w, h){
+  const k = w + 'x' + h;
+  return $('#sizePreset').querySelector('option[value="' + k + '"]') ? k : 'custom';
+}
+
+/* ════════════════════════════════════════════════
    EXPORT
    ════════════════════════════════════════════════ */
 function save(canvas, name){
@@ -1208,6 +2341,17 @@ function blit(g, o, i, x, y, s){
 function bake(g, w, h){
   if(!S.bake) return;
   g.fillStyle = '#0c0c0e'; g.fillRect(0, 0, w, h);
+}
+
+/** Native sprite, or an exact integer nearest-neighbour blow-up of it.
+ *  Never re-rendered from the source — always the repaired native pixels. */
+function expSprite(mult){
+  const a = active(); if(!a) return;
+  const o = render(a), s = Math.max(1, mult|0);
+  const c = makeCanvas(o.w*s, o.h*s), g = c.getContext('2d');
+  bake(g, c.width, c.height);
+  blit(g, o, S.frame, 0, 0, s);
+  save(c, base(a) + '_f' + (S.frame+1) + '_' + (o.w*s) + 'x' + (o.h*s) + '.png');
 }
 
 function expFrame(){
@@ -1257,16 +2401,31 @@ function expJson(){
   const h = Math.max(...outs.map(o => o.h));
   const cols = Math.max(...outs.map(o => o.frames.length));
   const atlas = {
-    generator: 'PIXELSMITH v1.1',
+    generator: 'PIXELSMITH v2.0',
     cell: {w, h}, exportScale: s,
     cellPx: {w: w*s, h: h*s},
     anchor: {x: Math.round(w/2), y: h - S.floor},
     fps: S.fps,
     palette: S.palette.map(hex),
+    repair: {
+      isolated: S.iso ? S.isoMax : 0,
+      pinholes: S.pin ? S.pinMax : 0,
+      edgeCleanup: ['off','low','medium','high'][S.edge],
+      outline: S.outline ? {px:S.outline, neighbourhood:S.outlineConn8 ? 8 : 4, color:hex(S.outlineCol)} : null,
+      mergeNear: S.merge ? S.mergeTol : 0,
+      paletteMode: S.palMode, paletteTarget: S.palMode === 'off' ? null : S.quantN
+    },
     animations: S.anims.map((a, r) => ({
       name: base(a), row: r, frames: a.frames,
       loop: !/attack|jump|hurt|death|land/i.test(a.name),
-      source: {cell: a.cellW + 'x' + a.cellH, aligned: S.align && !a.free, footDrift: (S.align && !a.free) ? 0 : a.drift}
+      integrity: +outs[r].diags[0].integrity.score.toFixed(1),
+      manualEdits: outs[r].diags[0].edits,
+      source: {
+        cell: a.cellW + 'x' + a.cellH,
+        blockPitch: a.pitch ? +a.pitch.toFixed(2) : null,
+        aligned: S.align && !a.free,
+        footDrift: (S.align && !a.free) ? 0 : a.drift
+      }
     })),
     sheet: {cols, rows: outs.length, width: cols*w*s, height: outs.length*h*s}
   };
@@ -1312,7 +2471,7 @@ function addFiles(files){
       analyse(a);
       S.anims.push(a);
       if(S.active === null) S.active = a.id;
-      if(--pending === 0) refreshAll();
+      if(--pending === 0){ syncUI(); refreshAll(); }
     };
     img.onerror = () => { if(--pending === 0) refreshAll(); };
     img.src = URL.createObjectURL(file);
@@ -1321,9 +2480,13 @@ function addFiles(files){
 
 function drawSources(){
   const box = $('#srcList'); box.innerHTML = '';
+  const has = S.anims.length > 0;
+  $('#btnPerfect').disabled = !has;
+  $('#btnEdit').disabled = !has;
   S.anims.forEach(a => {
     const d = document.createElement('div');
     d.className = 'src' + (a.id === S.active ? ' on' : '');
+    const edited = a.edits ? Array.from(a.edits.values()).reduce((n,m) => n + m.size, 0) : 0;
 
     d.innerHTML =
       '<div class="src-top"><div class="src-name">' + a.name + '</div>' +
@@ -1331,15 +2494,14 @@ function drawSources(){
       '<div class="src-meta"><span>frames</span>' +
       '<input type="number" min="1" max="64" step="1" value="' + a.frames + '">' +
       '<span>' + a.cellW + '×' + a.cellH + (a.pitch ? ' · snapped' : '') + '</span>' +
+      (edited ? '<span class="src-edit">' + edited + 'px edit</span>' : '') +
       '<button class="pill' + (a.free ? ' free' : '') + '" title="Toggle alignment for this animation">' +
-      ((S.align && !a.free) ? 'aligned' : 'free \u00b7 ' + a.drift) + '</button></div>';
+      ((S.align && !a.free) ? 'aligned' : 'free · ' + a.drift) + '</button></div>';
     d.onclick = e => {
       if(e.target.tagName === 'INPUT' || e.target.classList.contains('pill')) return;
       S.active = a.id; S.frame = 0; stop();
-      $('#togKey').classList.toggle('on', !!a.key);
-      $('#togSnap').classList.toggle('on', !!a.snap);
-      $('#pitch').value = S.pitch || '';
-      refreshAll();
+      syncUI();
+      invalidate(); refreshAll();
     };
     d.querySelector('.src-x').onclick = e => {
       e.stopPropagation();
@@ -1355,7 +2517,7 @@ function drawSources(){
       const n = clamp(parseInt(e.target.value) || 1, 1, 64);
       if(a.src.width % n !== 0){ e.target.style.borderColor = 'var(--rust)'; }
       else e.target.style.borderColor = '';
-      a.frames = n; prep(a); S.frame = 0; refreshAll();
+      a.frames = n; a.edits = new Map(); prep(a); S.frame = 0; refreshAll();
     };
     box.appendChild(d);
   });
@@ -1366,29 +2528,30 @@ function drawGridRead(){
   if(!a){ el.textContent = 'Load art to detect the grid.'; return; }
   const bits = [];
   bits.push(a.hadAlpha ? 'Source has alpha.'
-    : '<span class="bad">No alpha channel</span> \u2014 background keyed out.');
+    : '<span class="bad">No alpha channel</span> — background keyed out.');
   if(a.pockets) bits.push('Erased <b>' + a.pockets + '</b> enclosed gap' + (a.pockets>1?'s':'') + '.');
   if(a.pitch){
     const frac = Math.abs(a.pitch - Math.round(a.pitch)) > 0.08;
     bits.push('Confidence <b>' + (a.conf || 0).toFixed(2) + '</b>');
     bits.push('Block pitch <b>' + a.pitch.toFixed(2) + ' px</b>' +
       (frac ? ' <span class="bad">(fractional)</span>' : ''));
-    bits.push('Native art size <b>' + Math.round(a.native.w/a.frames) + ' \u00d7 ' + a.native.h + '</b> per frame');
-    if(a.native.h > S.target)
-      bits.push('<span class="bad">Cell is ' + S.target + 'px \u2014 discarding ' +
-        Math.round(100 - S.target/a.native.h*100) + '% of the drawn detail.</span>');
+    const nw = Math.round(a.native.w/a.frames);
+    bits.push('Native art size <b>' + nw + ' × ' + a.native.h + '</b> per frame');
+    if(a.native.h > S.outH)
+      bits.push('<span class="bad">Output is ' + S.outH + 'px tall — discarding ' +
+        Math.round(100 - S.outH/a.native.h*100) + '% of the drawn detail.</span>');
     /* Once the art is on its true grid, only whole-number reductions stay
        crisp. Anything else re-introduces the fractional-grid problem. */
     const clean = [];
     for(let k=2; k<=6; k++){
-      const cw2 = Math.round(a.native.w/a.frames)/k, ch2 = a.native.h/k;
+      const cw2 = nw/k, ch2 = a.native.h/k;
       if(Number.isInteger(cw2) && Number.isInteger(ch2) && ch2 >= 16)
-        clean.push('\u00f7' + k + ' = ' + cw2 + '\u00d7' + ch2);
+        clean.push('÷' + k + ' = ' + cw2 + '×' + ch2);
     }
     bits.push(clean.length ? 'Clean reductions: <b>' + clean.join('</b>, <b>') + '</b>'
-                           : 'No clean whole-number reduction \u2014 use native.');
+                           : 'No clean whole-number reduction — use native.');
   } else if(a.snap){
-    bits.push('<span class="bad">Not snapped</span> \u2014 ' +
+    bits.push('<span class="bad">Not snapped</span> — ' +
       (a.rejected || 'no repeating grid found') +
       '. Already-native art needs no snap; set a pitch by hand to force it.');
   }
@@ -1397,6 +2560,208 @@ function drawGridRead(){
 
 function reprep(){ S.anims.forEach(prep); invalidate(); refreshAll(); }
 function refreshAll(){ drawSources(); draw(); drawStrip(); drawPalette(); drawGridRead(); }
+
+/* ════════════════════════════════════════════════
+   PIXEL EDITOR
+   Native resolution only. One source pixel per click, no anti-aliasing,
+   no brush softness, no fractional coordinates.
+   ════════════════════════════════════════════════ */
+const ED = {
+  open:false, anim:null, frame:0, img:null, w:0, h:0,
+  zoom:16, tool:'pencil', color:[255,255,255], grid:true,
+  undo:[], redo:[], painting:false, last:null, changed:0
+};
+
+function openEditor(){
+  const a = active(); if(!a) return;
+  stop();
+  const out = render(a);
+  ED.open = true; ED.anim = a; ED.frame = clamp(S.frame, 0, out.frames.length-1);
+  ED.img = cloneImg(out.frames[ED.frame]);
+  ED.w = out.w; ED.h = out.h;
+  ED.undo = []; ED.redo = []; ED.changed = 0;
+
+  /* open at the largest integer zoom that actually fits — a 64×128 character
+     at a fixed 16× is 1024×2048 and lands the user inside a scroll box.
+     Un-hide first: a display:none stage measures 0. */
+  $('#editor').classList.remove('hide');
+  const st = $('#edStage');
+  const availW = (st.clientWidth || window.innerWidth) - 48;
+  const availH = (st.clientHeight || window.innerHeight - 160) - 48;
+  const steps = [32, 24, 16, 12, 8];
+  ED.zoom = steps.find(z => ED.w*z <= availW && ED.h*z <= availH) || 8;
+  $('#edZoom').value = String(ED.zoom);
+
+  /* start on the most common opaque colour so the pencil is immediately useful */
+  const tally = new Map(); const d = ED.img.data;
+  for(let i=0; i<d.length; i+=4){
+    if(!d[i+3]) continue;
+    const k = (d[i]<<16)|(d[i+1]<<8)|d[i+2];
+    tally.set(k, (tally.get(k)||0)+1);
+  }
+  let win = -1, wn = -1;
+  tally.forEach((n,k) => { if(n>wn){ wn=n; win=k; } });
+  if(win >= 0) ED.color = [(win>>16)&255, (win>>8)&255, win&255];
+
+  $('#edSize').textContent = ED.w + '×' + ED.h;
+  $('#edColor').value = hex(ED.color);
+  edPalette();
+  edDraw();
+}
+function closeEditor(){
+  ED.open = false; ED.img = null; ED.undo = []; ED.redo = [];
+  $('#editor').classList.add('hide');
+}
+
+function edPalette(){
+  const box = $('#edPal'); box.innerHTML = '';
+  const seen = new Map();
+  const d = ED.img.data;
+  for(let i=0; i<d.length; i+=4){
+    if(!d[i+3]) continue;
+    const k = (d[i]<<16)|(d[i+1]<<8)|d[i+2];
+    seen.set(k, (seen.get(k)||0)+1);
+  }
+  S.palette.forEach(c => seen.set((c[0]<<16)|(c[1]<<8)|c[2], (seen.get((c[0]<<16)|(c[1]<<8)|c[2])||0) + 1e9));
+  const cur = (ED.color[0]<<16)|(ED.color[1]<<8)|ED.color[2];
+  Array.from(seen.entries()).sort((a,b) => b[1]-a[1]).slice(0, 64).forEach(([k]) => {
+    const c = [(k>>16)&255, (k>>8)&255, k&255];
+    const e = document.createElement('div');
+    e.className = 'sw' + (k === cur ? ' on' : '');
+    e.style.background = hex(c); e.title = hex(c);
+    e.onclick = () => { ED.color = c; $('#edColor').value = hex(c); edPalette(); edStat(); };
+    box.appendChild(e);
+  });
+  $('#edCur').style.background = hex(ED.color);
+}
+
+function edDraw(){
+  const cv = $('#edCv'), Z = ED.zoom;
+  cv.width = ED.w*Z; cv.height = ED.h*Z;
+  cv.style.width = (ED.w*Z)+'px'; cv.style.height = (ED.h*Z)+'px';
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  checker(g, cv.width, cv.height);
+  g.drawImage(imgToCanvas(ED.img), 0, 0, cv.width, cv.height);
+  if(ED.grid && Z >= 8){
+    g.strokeStyle = 'rgba(110,164,196,.13)'; g.lineWidth = 1;
+    g.beginPath();
+    for(let x=0; x<=ED.w; x++){ g.moveTo(x*Z+.5, 0); g.lineTo(x*Z+.5, cv.height); }
+    for(let y=0; y<=ED.h; y++){ g.moveTo(0, y*Z+.5); g.lineTo(cv.width, y*Z+.5); }
+    g.stroke();
+  }
+  edStat();
+}
+function edStat(){
+  $('#edChanged').textContent = ED.changed;
+  $('#edCur').style.background = hex(ED.color);
+}
+
+function edSnapshot(){
+  ED.undo.push(new Uint8ClampedArray(ED.img.data));
+  if(ED.undo.length > 64) ED.undo.shift();
+  ED.redo.length = 0;
+}
+function edUndo(){
+  if(!ED.undo.length) return;
+  ED.redo.push(new Uint8ClampedArray(ED.img.data));
+  ED.img.data.set(ED.undo.pop());
+  edCountChanged(); edDraw(); edPalette();
+}
+function edRedo(){
+  if(!ED.redo.length) return;
+  ED.undo.push(new Uint8ClampedArray(ED.img.data));
+  ED.img.data.set(ED.redo.pop());
+  edCountChanged(); edDraw(); edPalette();
+}
+function edCountChanged(){
+  const out = ED.anim.out;
+  if(!out){ ED.changed = 0; return; }
+  const b = out.base[ED.frame].data, d = ED.img.data;
+  let n = 0;
+  for(let i=0; i<d.length; i+=4){
+    if(d[i]!==b[i] || d[i+1]!==b[i+1] || d[i+2]!==b[i+2] || d[i+3]!==b[i+3]) n++;
+  }
+  ED.changed = n;
+}
+
+function edSet(x, y){
+  if(x<0 || y<0 || x>=ED.w || y>=ED.h) return;
+  const d = ED.img.data, i = (y*ED.w + x)*4;
+  if(ED.tool === 'eraser'){ d[i+3] = 0; }
+  else { d[i] = ED.color[0]; d[i+1] = ED.color[1]; d[i+2] = ED.color[2]; d[i+3] = 255; }
+}
+function edPick(x, y){
+  if(x<0 || y<0 || x>=ED.w || y>=ED.h) return;
+  const d = ED.img.data, i = (y*ED.w + x)*4;
+  if(!d[i+3]) return;
+  ED.color = [d[i], d[i+1], d[i+2]];
+  $('#edColor').value = hex(ED.color);
+  edPalette();
+}
+function edFill(x, y){
+  if(x<0 || y<0 || x>=ED.w || y>=ED.h) return;
+  const d = ED.img.data, w = ED.w, h = ED.h;
+  const at = k => [d[k*4], d[k*4+1], d[k*4+2], d[k*4+3]];
+  const start = at(y*w + x);
+  const tgt = ED.tool === 'eraser' ? [0,0,0,0] : [ED.color[0], ED.color[1], ED.color[2], 255];
+  const same = (p,q) => (p[3]===0 && q[3]===0) || (p[0]===q[0]&&p[1]===q[1]&&p[2]===q[2]&&p[3]===q[3]);
+  if(same(start, tgt)) return;
+  const seen = new Uint8Array(w*h);
+  const stack = [y*w + x];
+  seen[y*w+x] = 1;
+  while(stack.length){
+    const k = stack.pop();
+    d[k*4]=tgt[0]; d[k*4+1]=tgt[1]; d[k*4+2]=tgt[2]; d[k*4+3]=tgt[3];
+    const cx = k % w, cy = (k/w)|0;
+    for(let i=0; i<ORTH.length; i++){
+      const nx = cx+ORTH[i][0], ny = cy+ORTH[i][1];
+      if(nx<0||ny<0||nx>=w||ny>=h) continue;
+      const nk = ny*w+nx;
+      if(seen[nk] || !same(at(nk), start)) continue;
+      seen[nk] = 1; stack.push(nk);
+    }
+  }
+}
+/** integer Bresenham so a fast drag does not leave gaps — and never
+ *  produces a fractional coordinate */
+function edLine(x0, y0, x1, y1){
+  let dx = Math.abs(x1-x0), sx = x0<x1 ? 1 : -1;
+  let dy = -Math.abs(y1-y0), sy = y0<y1 ? 1 : -1;
+  let err = dx+dy;
+  for(;;){
+    edSet(x0, y0);
+    if(x0===x1 && y0===y1) break;
+    const e2 = 2*err;
+    if(e2 >= dy){ err += dy; x0 += sx; }
+    if(e2 <= dx){ err += dx; y0 += sy; }
+  }
+}
+function edPos(e){
+  const r = $('#edCv').getBoundingClientRect();
+  return {
+    x: Math.floor((e.clientX - r.left) / ED.zoom),
+    y: Math.floor((e.clientY - r.top) / ED.zoom)
+  };
+}
+
+function applyEdits(){
+  const a = ED.anim, out = a.out;
+  if(!out){ closeEditor(); return; }
+  const b = out.base[ED.frame].data, d = ED.img.data;
+  const m = new Map();
+  for(let p=0; p<ED.w*ED.h; p++){
+    const i = p*4;
+    if(d[i]!==b[i] || d[i+1]!==b[i+1] || d[i+2]!==b[i+2] || d[i+3]!==b[i+3]){
+      m.set(p, [d[i], d[i+1], d[i+2], d[i+3]]);
+    }
+  }
+  if(a.editSize !== ED.w + 'x' + ED.h){ a.edits = new Map(); a.editSize = ED.w + 'x' + ED.h; }
+  if(m.size) a.edits.set(ED.frame, m); else a.edits.delete(ED.frame);
+  a.editVer = (a.editVer || 0) + 1;
+  closeEditor();
+  invalidate(); refreshAll();
+}
 
 /* ════════════════════════════════════════════════
    BIND
@@ -1413,15 +2778,27 @@ $('#file').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
 }));
 document.addEventListener('drop', e => { if(e.dataTransfer) addFiles(e.dataTransfer.files); });
 
-$('#target').onchange = e => {
-  const v = parseInt(e.target.value);
-  $('#rowCustom').classList.toggle('hide', v !== 0);
-  S.target = v === 0 ? clamp(parseInt($('#targetCustom').value) || 64, 8, 512) : v;
+/* ---- output size ---- */
+function setSize(w, h){
+  S.outW = clamp(w, 8, 512); S.outH = clamp(h, 8, 512);
+  $('#outW').value = S.outW; $('#outH').value = S.outH;
+  $('#sizePreset').value = presetFor(S.outW, S.outH);
   invalidate(); refreshAll();
+}
+$('#sizePreset').onchange = e => {
+  if(e.target.value === 'custom') return;
+  const [w,h] = e.target.value.split('x').map(Number);
+  setSize(w, h);
 };
-$('#targetCustom').onchange = e => {
-  S.target = clamp(parseInt(e.target.value) || 64, 8, 512);
-  e.target.value = S.target; invalidate(); refreshAll();
+$('#outW').onchange = e => {
+  const w = clamp(parseInt(e.target.value) || 64, 8, 512);
+  const h = S.aspectLock ? Math.round(w * S.outH / S.outW) : S.outH;
+  setSize(w, h);
+};
+$('#outH').onchange = e => {
+  const h = clamp(parseInt(e.target.value) || 64, 8, 512);
+  const w = S.aspectLock ? Math.round(h * S.outW / S.outH) : S.outW;
+  setSize(w, h);
 };
 $('#alpha').oninput = e => {
   S.alpha = parseInt(e.target.value); $('#alphaVal').textContent = S.alpha;
@@ -1438,38 +2815,91 @@ function toggle(sel, key, after){
     if(after) after();
   };
 }
-toggle('#togAlign', 'align', () => { invalidate(); refreshAll(); });
-toggle('#togMatch', 'matchH', () => { $('#rowHeight').classList.toggle('hide', !S.matchH); invalidate(); refreshAll(); });
+const bounce = () => { invalidate(); refreshAll(); };
+toggle('#togAlign', 'align', bounce);
+toggle('#togMatch', 'matchH', () => { $('#rowHeight').classList.toggle('hide', !S.matchH); bounce(); });
+toggle('#togAspect', 'aspectLock', () => {});
 toggle('#togGrid', 'showGrid', draw);
 toggle('#togBase', 'showBase', draw);
+toggle('#togGaps', 'showGaps', draw);
 toggle('#togBake', 'bake', () => {});
+toggle('#togIso', 'iso', bounce);
+toggle('#togPin', 'pin', bounce);
+toggle('#togMerge', 'merge', bounce);
 
-$$('#palMode button').forEach(b => b.onclick = () => {
-  $$('#palMode button').forEach(x => x.classList.remove('on'));
-  b.classList.add('on');
-  S.palMode = b.dataset.v;
+/** wire a segmented control to a state key */
+function segBind(sel, fn){
+  $$(sel + ' button').forEach(b => b.onclick = () => {
+    $$(sel + ' button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    fn(b.dataset.v);
+  });
+}
+segBind('#isoStrength', v => { S.isoMax = parseInt(v); bounce(); });
+segBind('#pinStrength', v => { S.pinMax = parseInt(v); bounce(); });
+segBind('#edgeLevel',   v => { S.edge   = parseInt(v); bounce(); });
+segBind('#outlineN',    v => { S.outline= parseInt(v); bounce(); });
+segBind('#viewMode',    v => { S.view = v; draw(); });
+
+$('#outlineConn').onchange = e => { S.outlineConn8 = e.target.value === '8'; bounce(); };
+$('#outlineCol').oninput = e => {
+  const c = parseHex(e.target.value); if(!c) return;
+  S.outlineCol = c; $('#outlineHex').value = hex(c); bounce();
+};
+$('#outlineHex').onchange = e => {
+  const c = parseHex(e.target.value);
+  if(!c){ e.target.value = hex(S.outlineCol); return; }
+  S.outlineCol = c; $('#outlineCol').value = hex(c); bounce();
+};
+$('#mergeTol').oninput = e => { S.mergeTol = parseInt(e.target.value); $('#mergeVal').textContent = S.mergeTol; };
+$('#mergeTol').onchange = bounce;
+
+$('#btnPerfect').onclick = makePixelPerfect;
+
+/* ---- palette ---- */
+segBind('#palMode', v => {
+  S.palMode = v;
   $('#rowQuant').classList.toggle('hide', S.palMode === 'off');
-  invalidate(); refreshAll();
+  segSet('#palPreset', S.palMode === 'off' ? 0 : S.quantN);
+  bounce();
 });
-$('#quantN').onchange = e => { S.quantN = clamp(parseInt(e.target.value)||16, 2, 64); e.target.value = S.quantN; invalidate(); refreshAll(); };
+segBind('#palPreset', v => {
+  const n = parseInt(v);
+  if(n === 0){
+    S.palMode = 'off';
+    segSet('#palMode', 'off');
+    $('#rowQuant').classList.add('hide');
+  } else {
+    S.quantN = n; $('#quantN').value = n;
+    if(S.palMode === 'off'){ S.palMode = 'quantize'; segSet('#palMode', 'quantize'); }
+    $('#rowQuant').classList.remove('hide');
+  }
+  bounce();
+});
+$('#quantN').onchange = e => {
+  S.quantN = clamp(parseInt(e.target.value)||32, 2, 64);
+  e.target.value = S.quantN;
+  segSet('#palPreset', S.quantN);
+  bounce();
+};
 
 $('#btnLock').onclick = () => {
   const a = active(); if(!a) return;
   const o = render(a);
   S.palette = medianCut(collect(o.frames, 16000), S.quantN);
   S.palMode = 'locked';
-  $$('#palMode button').forEach(x => x.classList.toggle('on', x.dataset.v === 'locked'));
+  segSet('#palMode', 'locked');
   $('#rowQuant').classList.remove('hide');
-  invalidate(); refreshAll();
+  bounce();
 };
 $('#btnPalClear').onclick = () => {
   S.palette = [];
   if(S.palMode === 'locked'){
     S.palMode = 'off';
-    $$('#palMode button').forEach(x => x.classList.toggle('on', x.dataset.v === 'off'));
+    segSet('#palMode', 'off');
     $('#rowQuant').classList.add('hide');
   }
-  invalidate(); refreshAll();
+  bounce();
 };
 $('#btnPalCopy').onclick = () => {
   if(!S.palette.length) return;
@@ -1479,9 +2909,10 @@ $('#btnPalCopy').onclick = () => {
   b.textContent = 'Copied'; setTimeout(() => b.textContent = o, 1100);
 };
 
+/* ---- source grid ---- */
 $('#togKey').onclick = () => {
   const a = active(); if(!a) return;
-  a.key = !a.key; $('#togKey').classList.toggle('on', a.key);
+  a.keyBg = !a.keyBg; $('#togKey').classList.toggle('on', a.keyBg);
   prep(a); a.out = null; refreshAll();
 };
 $('#togSnap').onclick = () => {
@@ -1509,30 +2940,106 @@ $('#pitch').onchange = e => {
 };
 $('#btnNative').onclick = () => {
   const a = active(); if(!a || !a.native) return;
-  const n = clamp(Math.max(Math.round(a.native.w/a.frames), a.native.h), 8, 512);
-  S.target = n;
-  $('#target').value = [16,24,32,48,64,96,128].includes(n) ? String(n) : '0';
-  $('#rowCustom').classList.toggle('hide', $('#target').value !== '0');
-  $('#targetCustom').value = n;
-  invalidate(); refreshAll();
+  setSize(Math.round(a.native.w/a.frames), a.native.h);
 };
 
+/* ---- transport ---- */
 $('#btnPlay').onclick = () => S.playing ? stop() : play();
 $('#fps').oninput = e => { S.fps = parseInt(e.target.value); $('#fpsVal').textContent = S.fps; };
 $('#zIn').onclick = () => { S.fit = false; S.zoom = clamp(S.zoom+1, 1, 40); $('#zVal').textContent = S.zoom+'×'; draw(); };
 $('#zOut').onclick = () => { S.fit = false; S.zoom = clamp(S.zoom-1, 1, 40); $('#zVal').textContent = S.zoom+'×'; draw(); };
 $('#zFit').onclick = () => { S.fit = true; draw(); };
 
+/* ---- split-view drag ---- */
+(function(){
+  const wrap = $('#viewWrap');
+  let dragging = false;
+  const upd = e => {
+    const cv = $('#view');
+    const r = cv.getBoundingClientRect();
+    if(!r.width) return;
+    S.split = clamp((e.clientX - r.left) / r.width, 0, 1);
+    draw();
+  };
+  wrap.addEventListener('pointerdown', e => {
+    if(S.view !== 'split') return;
+    dragging = true; wrap.setPointerCapture(e.pointerId); upd(e);
+  });
+  wrap.addEventListener('pointermove', e => { if(dragging) upd(e); });
+  wrap.addEventListener('pointerup',   e => { dragging = false; });
+  wrap.addEventListener('pointercancel', () => { dragging = false; });
+})();
+
+/* ---- export ---- */
 $('#scale').onchange = e => { S.scale = parseInt(e.target.value); draw(); };
 $('#cols').onchange = e => { S.cols = clamp(parseInt(e.target.value)||8, 1, 32); e.target.value = S.cols; };
-
+$('#expNative').onclick = () => expSprite(1);
+$('#exp4').onclick  = () => expSprite(4);
+$('#exp8').onclick  = () => expSprite(8);
+$('#exp16').onclick = () => expSprite(16);
 $('#expFrame').onclick = expFrame;
 $('#expStrip').onclick = expStrip;
 $('#expSheet').onclick = expSheet;
 $('#expMaster').onclick = expMaster;
 $('#expJson').onclick = expJson;
 
+/* ---- editor ---- */
+$('#btnEdit').onclick = openEditor;
+$('#edCancel').onclick = closeEditor;
+$('#edApply').onclick = applyEdits;
+$('#edUndo').onclick = edUndo;
+$('#edRedo').onclick = edRedo;
+$('#edZoom').onchange = e => { ED.zoom = parseInt(e.target.value); edDraw(); };
+$('#edGrid').onclick = () => { ED.grid = !ED.grid; $('#edGrid').classList.toggle('on', ED.grid); edDraw(); };
+$('#edColor').oninput = e => {
+  const c = parseHex(e.target.value); if(!c) return;
+  ED.color = c; edPalette(); edStat();
+};
+segBind('#edTool', v => { ED.tool = v; });
+
+(function(){
+  const cv = $('#edCv');
+  cv.addEventListener('pointerdown', e => {
+    if(!ED.open) return;
+    e.preventDefault();
+    const p = edPos(e);
+    if(ED.tool === 'pick'){ edPick(p.x, p.y); return; }
+    edSnapshot();
+    ED.painting = true; ED.last = p;
+    cv.setPointerCapture(e.pointerId);
+    if(ED.tool === 'fill') edFill(p.x, p.y); else edSet(p.x, p.y);
+    edCountChanged(); edDraw();
+  });
+  cv.addEventListener('pointermove', e => {
+    if(!ED.open) return;
+    const p = edPos(e);
+    $('#edX').textContent = (p.x>=0 && p.x<ED.w) ? p.x : '—';
+    $('#edY').textContent = (p.y>=0 && p.y<ED.h) ? p.y : '—';
+    if(!ED.painting || ED.tool === 'fill' || ED.tool === 'pick') return;
+    if(ED.last) edLine(ED.last.x, ED.last.y, p.x, p.y); else edSet(p.x, p.y);
+    ED.last = p;
+    edCountChanged(); edDraw();
+  });
+  const end = () => { if(!ED.painting) return; ED.painting = false; ED.last = null; edPalette(); };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+  cv.addEventListener('pointerleave', () => { $('#edX').textContent = '—'; $('#edY').textContent = '—'; });
+})();
+
+/* ---- keys ---- */
 document.addEventListener('keydown', e => {
+  if(ED.open){
+    if(e.key === 'Escape'){ closeEditor(); return; }
+    if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){
+      e.preventDefault(); e.shiftKey ? edRedo() : edUndo(); return;
+    }
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y'){ e.preventDefault(); edRedo(); return; }
+    const map = {b:'pencil', e:'eraser', i:'pick', g:'fill'};
+    const t = map[e.key.toLowerCase()];
+    if(t){ ED.tool = t; segSet('#edTool', t); }
+    return;
+  }
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
   const a = active(); if(!a) return;
   if(e.key === ' '){ e.preventDefault(); S.playing ? stop() : play(); }
@@ -1544,6 +3051,7 @@ let rt = null;
 window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
 
 $('#rowQuant').classList.add('hide');
+syncUI();
 refreshAll();
 </script>
 </body>
