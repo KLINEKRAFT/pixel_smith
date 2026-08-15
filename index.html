@@ -222,7 +222,9 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 .view{
   flex:1;min-height:320px;position:relative;display:flex;
   align-items:center;justify-content:center;overflow:hidden;
-  touch-action:none;
+  /* pan-y, not none: the split divider only needs the horizontal axis, and
+     taking both would stop the phone scrolling the page over the preview */
+  touch-action:pan-y;
 }
 #view{image-rendering:pixelated;image-rendering:crisp-edges}
 .hud{
@@ -315,30 +317,62 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
   text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;
 }
 .hide{display:none!important}
+/* the phone layout lets <body> scroll; a fixed overlay on a scrollable body
+   rubber-bands on iOS, so freeze it while the editor is open */
+body.modal-open{overflow:hidden!important;position:relative}
 
 /* ---------- pixel editor ---------- */
 .modal{
-  position:fixed;inset:0;z-index:60;background:rgba(3,3,4,.94);
-  display:flex;flex-direction:column;
+  position:fixed;inset:0;z-index:60;background:rgba(3,3,4,.96);
+  display:flex;flex-direction:column;height:100dvh;
+  /* a drawing surface must not double-tap-zoom, text-select or long-press
+     the page out from under the user's finger */
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
 }
 .ed-top{
   border-bottom:1px solid var(--line);background:var(--panel);
-  padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:9px 14px;padding-top:calc(9px + env(safe-area-inset-top));
+  display:flex;align-items:center;gap:10px;flex:0 0 auto;
 }
-.ed-title{font-family:var(--disp);font-weight:700;letter-spacing:.14em;font-size:11px;text-transform:uppercase}
+.ed-title{font-family:var(--disp);font-weight:700;letter-spacing:.14em;font-size:11px;text-transform:uppercase;white-space:nowrap}
 .ed-title span{color:var(--gold)}
+
+/* The stage owns its own pan/zoom. Native scrolling is deliberately off:
+   one finger draws, two fingers pan and pinch. */
 .ed-stage{
-  flex:1;min-height:0;overflow:auto;display:flex;align-items:center;
-  justify-content:center;padding:20px;touch-action:none;
+  flex:1 1 auto;min-height:0;position:relative;overflow:hidden;
+  touch-action:none;background:#08080a;
 }
-#edCv{image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair;flex:0 0 auto}
+#edCv{
+  position:absolute;left:0;top:0;
+  image-rendering:pixelated;image-rendering:crisp-edges;
+  cursor:crosshair;touch-action:none;
+}
+#edCv.panning{cursor:grab}
+.ed-hint{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  background:rgba(12,12,14,.94);border:1px solid var(--line-hot);border-radius:3px;
+  padding:7px 12px;color:var(--dim);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;pointer-events:none;white-space:nowrap;
+  transition:opacity .5s;
+}
+.ed-hint.out{opacity:0}
+
 .ed-bot{
-  border-top:1px solid var(--line);background:var(--panel);padding:10px 14px;
-  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  border-top:1px solid var(--line);background:var(--panel);
+  padding:9px 14px;padding-bottom:calc(9px + env(safe-area-inset-bottom));
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:0 0 auto;
 }
-.ed-pal{display:flex;gap:3px;flex-wrap:wrap;max-width:100%;flex:1;min-width:120px}
+.ed-grp{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+.ed-grp .btn{padding:7px 9px}
+.ed-palrow{display:flex;align-items:center;gap:8px;flex:1 1 200px;min-width:0}
+.ed-pal{display:flex;gap:4px;overflow-x:auto;flex:1;min-width:0;padding-bottom:2px}
+.ed-pal::-webkit-scrollbar{height:4px}
+.ed-pal::-webkit-scrollbar-thumb{background:var(--line-hot)}
 .ed-pal .sw{
-  width:18px;height:18px;aspect-ratio:auto;cursor:pointer;border:1px solid #000;
+  width:22px;height:22px;aspect-ratio:auto;cursor:pointer;border:1px solid #000;
+  flex:0 0 auto;
 }
 .ed-pal .sw.on{outline:1px solid var(--steel);outline-offset:1px}
 .ed-cur{
@@ -348,11 +382,41 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
   background-size:8px 8px;background-position:0 0,4px 4px;
 }
 .ed-cur i{display:block;width:100%;height:100%}
-.ed-stat{color:var(--dimmer);font-size:10px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.ed-stat{
+  color:var(--dimmer);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  white-space:nowrap;margin-left:auto;
+}
 .ed-stat b{color:var(--steel);font-weight:400;font-variant-numeric:tabular-nums}
-@media (max-width:700px){
-  .ed-top,.ed-bot{gap:6px;padding:8px 10px}
-  .ed-title{width:100%}
+#edZoomVal{min-width:30px;text-align:center;color:var(--steel)}
+
+/* ---- any touch device, including a phone held in landscape (which is wide
+        enough to miss a width breakpoint but still driven by a fingertip) ---- */
+@media (pointer:coarse){
+  #edTool button{padding:12px 4px}
+  .ed-grp .btn{padding:11px 12px}
+  .ed-top .btn{padding:11px 14px}
+  .ed-pal .sw{width:28px;height:28px}
+  .ed-cur{width:30px;height:30px}
+  #edColor{width:34px;height:30px}
+}
+
+/* ---- phone: everything interactive moves within thumb reach and every
+        target grows to a finger-sized box ---- */
+@media (max-width:760px){
+  .ed-top{padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));gap:8px}
+  .ed-title{display:none}
+  .ed-top .btn{padding:12px 14px;font-size:11px}
+  .ed-stat{font-size:9px;letter-spacing:.04em;margin:0 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .ed-bot{gap:7px;padding:7px 10px;padding-bottom:calc(7px + env(safe-area-inset-bottom))}
+  #edTool{flex:0 0 100%;order:1}
+  #edTool button{padding:13px 2px}
+  .ed-grp{order:2;flex:1 1 auto;justify-content:center}
+  .ed-grp .btn{padding:11px 10px;flex:1 1 auto}
+  .ed-palrow{order:3;flex:0 0 100%}
+  .ed-pal .sw{width:30px;height:30px}
+  .ed-cur{width:32px;height:32px}
+  #edColor{width:36px;height:32px}
+  .ed-hint{font-size:9px;bottom:10px}
 }
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -678,36 +742,41 @@ input[type=range]::-moz-range-thumb{width:3px;height:14px;background:var(--steel
 <!-- ══════════ PIXEL EDITOR ══════════ -->
 <div class="modal hide" id="editor">
   <div class="ed-top">
+    <button class="btn" id="edCancel">Cancel</button>
     <div class="ed-title">EDIT <span>PIXELS</span></div>
-    <div class="seg mini" id="edTool" style="min-width:230px">
+    <div class="ed-stat">x <b id="edX">—</b> y <b id="edY">—</b> · <b id="edSize">—</b> · <b id="edChanged">0</b> px</div>
+    <button class="btn pri" id="edApply">Apply</button>
+  </div>
+
+  <div class="ed-stage" id="edStage">
+    <canvas id="edCv"></canvas>
+    <div class="ed-hint hide" id="edHint">One finger draws · two fingers pan &amp; zoom</div>
+  </div>
+
+  <div class="ed-bot">
+    <div class="seg mini" id="edTool">
       <button data-v="pencil" class="on">Pencil</button>
       <button data-v="eraser">Eraser</button>
       <button data-v="pick">Pick</button>
       <button data-v="fill">Fill</button>
+      <button data-v="pan">Pan</button>
     </div>
-    <button class="btn" id="edUndo">Undo</button>
-    <button class="btn" id="edRedo">Redo</button>
-    <div class="row" style="margin:0">
-      <select id="edZoom">
-        <option value="8">8×</option>
-        <option value="12">12×</option>
-        <option value="16" selected>16×</option>
-        <option value="24">24×</option>
-        <option value="32">32×</option>
-      </select>
+    <div class="ed-grp">
+      <button class="btn" id="edZoomOut">−</button>
+      <span class="tag" id="edZoomVal">16×</span>
+      <button class="btn" id="edZoomIn">+</button>
+      <button class="btn" id="edFit">Fit</button>
     </div>
-    <button class="tog on" id="edGrid" style="margin:0"><i></i><span>Grid</span></button>
-    <div style="margin-left:auto;display:flex;gap:6px">
-      <button class="btn" id="edCancel">Cancel</button>
-      <button class="btn pri" id="edApply">Apply changes</button>
+    <div class="ed-grp">
+      <button class="btn" id="edUndo">Undo</button>
+      <button class="btn" id="edRedo">Redo</button>
+      <button class="tog on" id="edGrid" style="margin:0"><i></i><span>Grid</span></button>
     </div>
-  </div>
-  <div class="ed-stage" id="edStage"><canvas id="edCv"></canvas></div>
-  <div class="ed-bot">
-    <div class="ed-cur"><i id="edCur"></i></div>
-    <input type="color" id="edColor" value="#ffffff">
-    <div class="ed-pal" id="edPal"></div>
-    <div class="ed-stat">x <b id="edX">—</b> y <b id="edY">—</b> · <b id="edSize">—</b> · <b id="edChanged">0</b> px changed</div>
+    <div class="ed-palrow">
+      <div class="ed-cur"><i id="edCur"></i></div>
+      <input type="color" id="edColor" value="#ffffff">
+      <div class="ed-pal" id="edPal"></div>
+    </div>
   </div>
 </div>
 
@@ -2568,9 +2637,54 @@ function refreshAll(){ drawSources(); draw(); drawStrip(); drawPalette(); drawGr
    ════════════════════════════════════════════════ */
 const ED = {
   open:false, anim:null, frame:0, img:null, w:0, h:0,
-  zoom:16, tool:'pencil', color:[255,255,255], grid:true,
-  undo:[], redo:[], painting:false, last:null, changed:0
+  zoom:16, panX:0, panY:0,
+  tool:'pencil', color:[255,255,255], grid:true,
+  undo:[], redo:[], painting:false, last:null, changed:0, strokeAt:0,
+  ptrs:new Map(), gesture:null, hintT:null
 };
+/* Integer zoom only — a fractional zoom in a pixel editor shows you pixels
+   that are not the pixels you are editing. Starts low enough that a whole
+   64×128 character fits on a phone screen. */
+const ZOOMS = [2,3,4,6,8,12,16,24,32,48];
+
+/** Keep the canvas inside the stage; centre it on whichever axis it fits. */
+function edClampPan(){
+  const st = $('#edStage');
+  const cw = ED.w*ED.zoom, ch = ED.h*ED.zoom;
+  const sw = st.clientWidth, sh = st.clientHeight;
+  ED.panX = cw <= sw ? Math.round((sw-cw)/2) : Math.round(clamp(ED.panX, sw-cw, 0));
+  ED.panY = ch <= sh ? Math.round((sh-ch)/2) : Math.round(clamp(ED.panY, sh-ch, 0));
+}
+
+/** Zoom while holding the image point under (ax,ay) still — so pinching, or
+ *  hitting +, magnifies what you are looking at rather than the top-left. */
+function edSetZoom(z, ax, ay){
+  const st = $('#edStage').getBoundingClientRect();
+  if(ax === undefined){ ax = st.left + st.width/2; ay = st.top + st.height/2; }
+  const old = ED.zoom;
+  z = clamp(z, ZOOMS[0], ZOOMS[ZOOMS.length-1]);
+  if(z === old) return;
+  const ix = (ax - st.left - ED.panX)/old;
+  const iy = (ay - st.top  - ED.panY)/old;
+  ED.zoom = z;
+  ED.panX = Math.round(ax - st.left - ix*z);
+  ED.panY = Math.round(ay - st.top  - iy*z);
+  edDraw();
+}
+function edStepZoom(dir, ax, ay){
+  let i = ZOOMS.indexOf(ED.zoom);
+  if(i < 0) i = ZOOMS.findIndex(z => z >= ED.zoom);
+  edSetZoom(ZOOMS[clamp(i + dir, 0, ZOOMS.length-1)], ax, ay);
+}
+function edFit(){
+  const st = $('#edStage');
+  const availW = st.clientWidth - 24, availH = st.clientHeight - 24;
+  for(let i=ZOOMS.length-1; i>=0; i--){
+    if(ED.w*ZOOMS[i] <= availW && ED.h*ZOOMS[i] <= availH){ ED.zoom = ZOOMS[i]; edDraw(); return; }
+  }
+  ED.zoom = ZOOMS[0];
+  edDraw();
+}
 
 function openEditor(){
   const a = active(); if(!a) return;
@@ -2581,16 +2695,8 @@ function openEditor(){
   ED.w = out.w; ED.h = out.h;
   ED.undo = []; ED.redo = []; ED.changed = 0;
 
-  /* open at the largest integer zoom that actually fits — a 64×128 character
-     at a fixed 16× is 1024×2048 and lands the user inside a scroll box.
-     Un-hide first: a display:none stage measures 0. */
-  $('#editor').classList.remove('hide');
-  const st = $('#edStage');
-  const availW = (st.clientWidth || window.innerWidth) - 48;
-  const availH = (st.clientHeight || window.innerHeight - 160) - 48;
-  const steps = [32, 24, 16, 12, 8];
-  ED.zoom = steps.find(z => ED.w*z <= availW && ED.h*z <= availH) || 8;
-  $('#edZoom').value = String(ED.zoom);
+  ED.ptrs.clear(); ED.gesture = null;
+  ED.panX = 0; ED.panY = 0;
 
   /* start on the most common opaque colour so the pencil is immediately useful */
   const tally = new Map(); const d = ED.img.data;
@@ -2603,13 +2709,32 @@ function openEditor(){
   tally.forEach((n,k) => { if(n>wn){ wn=n; win=k; } });
   if(win >= 0) ED.color = [(win>>16)&255, (win>>8)&255, win&255];
 
+  /* Un-hide before measuring: a display:none stage measures 0. */
+  $('#editor').classList.remove('hide');
+  /* Lock the page behind the modal — on iOS a scrollable body rubber-bands
+     under a fixed overlay and drags the whole editor around. */
+  document.body.classList.add('modal-open');
   $('#edSize').textContent = ED.w + '×' + ED.h;
   $('#edColor').value = hex(ED.color);
   edPalette();
-  edDraw();
+  edFit();
+
+  /* Touch users need to be told about the two-finger gesture once. */
+  if(matchMedia('(pointer:coarse)').matches){
+    const hint = $('#edHint');
+    hint.classList.remove('hide', 'out');
+    clearTimeout(ED.hintT);
+    ED.hintT = setTimeout(() => {
+      hint.classList.add('out');
+      ED.hintT = setTimeout(() => hint.classList.add('hide'), 600);
+    }, 2600);
+  }
 }
 function closeEditor(){
   ED.open = false; ED.img = null; ED.undo = []; ED.redo = [];
+  ED.ptrs.clear(); ED.gesture = null;
+  clearTimeout(ED.hintT);
+  document.body.classList.remove('modal-open');
   $('#editor').classList.add('hide');
 }
 
@@ -2637,8 +2762,12 @@ function edPalette(){
 
 function edDraw(){
   const cv = $('#edCv'), Z = ED.zoom;
+  edClampPan();
   cv.width = ED.w*Z; cv.height = ED.h*Z;
   cv.style.width = (ED.w*Z)+'px'; cv.style.height = (ED.h*Z)+'px';
+  cv.style.left = ED.panX+'px'; cv.style.top = ED.panY+'px';
+  cv.classList.toggle('panning', ED.tool === 'pan');
+  $('#edZoomVal').textContent = Z + '×';
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
   checker(g, cv.width, cv.height);
@@ -2989,41 +3118,135 @@ $('#edCancel').onclick = closeEditor;
 $('#edApply').onclick = applyEdits;
 $('#edUndo').onclick = edUndo;
 $('#edRedo').onclick = edRedo;
-$('#edZoom').onchange = e => { ED.zoom = parseInt(e.target.value); edDraw(); };
+$('#edZoomIn').onclick  = () => edStepZoom(+1);
+$('#edZoomOut').onclick = () => edStepZoom(-1);
+$('#edFit').onclick = edFit;
 $('#edGrid').onclick = () => { ED.grid = !ED.grid; $('#edGrid').classList.toggle('on', ED.grid); edDraw(); };
 $('#edColor').oninput = e => {
   const c = parseHex(e.target.value); if(!c) return;
   ED.color = c; edPalette(); edStat();
 };
-segBind('#edTool', v => { ED.tool = v; });
+segBind('#edTool', v => { ED.tool = v; edDraw(); });
 
+/* ── stage input ─────────────────────────────────────────────────
+   One finger draws, two fingers pan and pinch. That split is what makes a
+   pixel editor usable on a phone: a 64×128 sprite at a drawable zoom is
+   always larger than the screen, so navigation cannot be the same gesture
+   as drawing, and it cannot be left to native scrolling either — the
+   canvas has to swallow the touch to place a pixel accurately.
+   The Pan tool gives the same navigation to one finger, for anyone who
+   would rather not pinch (and for a mouse). */
 (function(){
-  const cv = $('#edCv');
-  cv.addEventListener('pointerdown', e => {
+  const stage = $('#edStage'), cv = $('#edCv');
+
+  const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+  const two = () => Array.from(ED.ptrs.values()).slice(0,2);
+
+  function beginGesture(){
+    if(ED.painting){
+      ED.painting = false; ED.last = null;
+      /* Two fingers never land on the same millisecond, so the first one has
+         already dabbed a pixel by the time the second arrives. Take it back —
+         otherwise every pan leaves a stray pixel behind. Only a stroke young
+         enough to be part of the same gesture is reverted; a deliberate line
+         the user was already drawing is kept. */
+      if(performance.now() - ED.strokeAt < 300 && ED.undo.length){
+        ED.img.data.set(ED.undo.pop());
+        edCountChanged(); edPalette();
+      }
+    }
+    const [a,b] = two();
+    ED.gesture = {d: dist(a,b), mx: (a.x+b.x)/2, my: (a.y+b.y)/2};
+  }
+
+  stage.addEventListener('pointerdown', e => {
     if(!ED.open) return;
     e.preventDefault();
+    ED.ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    try { stage.setPointerCapture(e.pointerId); } catch(_){}
+
+    if(ED.ptrs.size >= 2){ beginGesture(); return; }
+
+    if(ED.tool === 'pan'){ ED.gesture = {pan:true, mx:e.clientX, my:e.clientY}; return; }
+    /* a press that starts off the canvas is a pan, not a stroke */
+    if(e.target !== cv){ ED.gesture = {pan:true, mx:e.clientX, my:e.clientY}; return; }
+
     const p = edPos(e);
     if(ED.tool === 'pick'){ edPick(p.x, p.y); return; }
     edSnapshot();
-    ED.painting = true; ED.last = p;
-    cv.setPointerCapture(e.pointerId);
+    ED.painting = true; ED.last = p; ED.strokeAt = performance.now();
     if(ED.tool === 'fill') edFill(p.x, p.y); else edSet(p.x, p.y);
     edCountChanged(); edDraw();
   });
-  cv.addEventListener('pointermove', e => {
+
+  stage.addEventListener('pointermove', e => {
     if(!ED.open) return;
+    if(ED.ptrs.has(e.pointerId)) ED.ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
     const p = edPos(e);
     $('#edX').textContent = (p.x>=0 && p.x<ED.w) ? p.x : '—';
     $('#edY').textContent = (p.y>=0 && p.y<ED.h) ? p.y : '—';
+
+    /* two-finger pan + pinch */
+    if(ED.ptrs.size >= 2 && ED.gesture && !ED.gesture.pan){
+      const [a,b] = two();
+      const mx = (a.x+b.x)/2, my = (a.y+b.y)/2, d = dist(a,b);
+      const g = ED.gesture;
+      ED.panX += mx - g.mx; ED.panY += my - g.my;
+      g.mx = mx; g.my = my;
+      /* step the integer ladder once the pinch clears a threshold, so the
+         zoom never lands between two levels */
+      if(g.d > 0){
+        const r = d/g.d;
+        if(r > 1.28){ edStepZoom(+1, mx, my); g.d = d; return; }
+        if(r < 0.78){ edStepZoom(-1, mx, my); g.d = d; return; }
+      }
+      edDraw();
+      return;
+    }
+    /* one-finger pan (Pan tool, or a drag that began off-canvas) */
+    if(ED.gesture && ED.gesture.pan){
+      ED.panX += e.clientX - ED.gesture.mx;
+      ED.panY += e.clientY - ED.gesture.my;
+      ED.gesture.mx = e.clientX; ED.gesture.my = e.clientY;
+      edDraw();
+      return;
+    }
+
     if(!ED.painting || ED.tool === 'fill' || ED.tool === 'pick') return;
     if(ED.last) edLine(ED.last.x, ED.last.y, p.x, p.y); else edSet(p.x, p.y);
     ED.last = p;
     edCountChanged(); edDraw();
   });
-  const end = () => { if(!ED.painting) return; ED.painting = false; ED.last = null; edPalette(); };
-  cv.addEventListener('pointerup', end);
-  cv.addEventListener('pointercancel', end);
-  cv.addEventListener('pointerleave', () => { $('#edX').textContent = '—'; $('#edY').textContent = '—'; });
+
+  const release = e => {
+    ED.ptrs.delete(e.pointerId);
+    try { stage.releasePointerCapture(e.pointerId); } catch(_){}
+    if(ED.ptrs.size < 2) ED.gesture = ED.ptrs.size === 1 && ED.gesture && ED.gesture.pan
+      ? ED.gesture : null;
+    if(ED.ptrs.size === 0){
+      ED.gesture = null;
+      if(ED.painting){ ED.painting = false; ED.last = null; edPalette(); }
+    }
+  };
+  stage.addEventListener('pointerup', release);
+  stage.addEventListener('pointercancel', release);
+  stage.addEventListener('pointerleave', () => {
+    $('#edX').textContent = '—'; $('#edY').textContent = '—';
+  });
+
+  /* desktop: wheel pans, ctrl/⌘+wheel zooms (native scrolling is off) */
+  stage.addEventListener('wheel', e => {
+    if(!ED.open) return;
+    e.preventDefault();
+    if(e.ctrlKey || e.metaKey){ edStepZoom(e.deltaY < 0 ? +1 : -1, e.clientX, e.clientY); return; }
+    if(e.shiftKey){ ED.panX -= e.deltaY; ED.panY -= e.deltaX; }
+    else { ED.panX -= e.deltaX; ED.panY -= e.deltaY; }
+    edDraw();
+  }, {passive:false});
+
+  /* rotating the phone changes the stage box under the sprite */
+  window.addEventListener('resize', () => { if(ED.open) edDraw(); });
 })();
 
 /* ---- keys ---- */
@@ -3035,9 +3258,12 @@ document.addEventListener('keydown', e => {
       e.preventDefault(); e.shiftKey ? edRedo() : edUndo(); return;
     }
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y'){ e.preventDefault(); edRedo(); return; }
-    const map = {b:'pencil', e:'eraser', i:'pick', g:'fill'};
+    if(e.key === '+' || e.key === '='){ e.preventDefault(); edStepZoom(+1); return; }
+    if(e.key === '-' || e.key === '_'){ e.preventDefault(); edStepZoom(-1); return; }
+    if(e.key === '0'){ e.preventDefault(); edFit(); return; }
+    const map = {b:'pencil', e:'eraser', i:'pick', g:'fill', h:'pan'};
     const t = map[e.key.toLowerCase()];
-    if(t){ ED.tool = t; segSet('#edTool', t); }
+    if(t){ ED.tool = t; segSet('#edTool', t); edDraw(); }
     return;
   }
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
