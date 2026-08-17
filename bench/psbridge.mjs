@@ -65,8 +65,8 @@ const FNS = ['cloneImg','hardAlpha','collect','medianCut','chRange','spread','wi
              'snapGrid','labelComponents','opaqueMask',
              'contentBox','bboxOf','mergeNearColors','cleanIsolated','fillPinholes',
              'modalNeighbour','edgeCleanup',
-             'gridLines','gridSums','gridEnergy','distillAxis','pickStep','detectGrid'];
-const CONSTS = ['RING','ORTH','NOISE_TOL','clamp','GRID'];
+             'gridPalette','gridQuant','gridLines','gridSums','gridEnergy','distillAxis','pickStep','detectGrid'];
+const CONSTS = ['RING','ORTH','NOISE_TOL','clamp','GRID','GB'];
 
 class ImageDataShim {
   constructor(a, b, c){
@@ -132,7 +132,13 @@ process.stdin.on('data', chunk => {
     buf = buf.subarray(need);
     let r;
     try { r = reconstruct(w, h, px); }
-    catch(e){ process.stderr.write('ERR ' + e.message + '\n'); r = {cols:w, rows:h, data:px}; }
+    catch(e){
+      // Never silently fall back: a bug in the bridge would masquerade as the
+      // detector scoring badly, which is exactly the confusion this exists to
+      // remove. Die loudly and let the run fail.
+      process.stderr.write('BRIDGE ERROR: ' + (e && e.stack || e) + '\n');
+      process.exit(3);
+    }
     const head = Buffer.alloc(8);
     head.writeUInt32LE(r.cols, 0); head.writeUInt32LE(r.rows, 4);
     process.stdout.write(head);
@@ -140,4 +146,35 @@ process.stdin.on('data', chunk => {
   }
 });
 process.stdin.on('end', () => process.exit(0));
-process.stderr.write('psbridge ready (gates=' + (GATES?'on':'off') + ')\n');
+
+/* Self-test before accepting any work.
+   The extraction lists above name functions in index.html; when the app
+   renames one, a stale list silently yields a bridge that throws on every
+   request. Falling back to "return the source" then looks exactly like a
+   detector that refuses everything — it scored this harness 0.0% exact once,
+   which cost more time than the bug did. So prove the pipeline runs, on a
+   synthetic 8x checkerboard whose answer is known, before reporting ready. */
+(function selfTest(){
+  const N = 16, S8 = 8, W = N*S8;
+  const img = new ImageDataShim(W, W);
+  for(let y=0; y<W; y++) for(let x=0; x<W; x++){
+    const on = ((x/S8|0) + (y/S8|0)) % 2 === 0;
+    const i = (y*W + x)*4;
+    img.data[i] = on ? 230 : 40; img.data[i+1] = on ? 200 : 60;
+    img.data[i+2] = on ? 120 : 90; img.data[i+3] = 255;
+  }
+  let g;
+  try { g = api.detectGrid(img, {x0:0, y0:0, cw:W, ch:W}); }
+  catch(e){
+    process.stderr.write('psbridge SELF-TEST THREW: ' + (e && e.stack || e) +
+      '\nThe extraction lists in this file are probably stale against index.html.\n');
+    process.exit(4);
+  }
+  if(!g || Math.abs(g.cols - N) > 1 || Math.abs(g.rows - N) > 1){
+    process.stderr.write('psbridge SELF-TEST FAILED: an 8x checkerboard of a ' +
+      N + 'x' + N + ' grid came back as ' + (g ? g.cols+'x'+g.rows : 'null') + '\n');
+    process.exit(5);
+  }
+  process.stderr.write('psbridge ready (gates=' + (GATES?'on':'off') +
+    ', self-test ' + g.cols + 'x' + g.rows + ' ok)\n');
+})();
