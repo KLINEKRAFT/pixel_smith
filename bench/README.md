@@ -88,19 +88,50 @@ it is not actually native.
 
 ## Where we stand
 
-Measured on a 60-sprite synthetic corpus, 10 images × 43 categories:
+Measured on a 60-sprite synthetic corpus, 8 images × 43 categories:
 
 | Method | Exact % | Grid align % |
 |---|---|---|
-| Pixel Smith, old comb detector | 2.9 | 38.2 |
-| Naive baseline | 4.5 | 43.1 |
-| Pixel Smith, distillability detector | see `results/` | |
-| Retro Diffusion Pixel Art Fixer | 70.7 | 88.9 |
+| Pixel Smith, old edge-energy comb | 2.9 | 38.2 |
+| Naive baseline | 4.4 | 42.5 |
+| **Pixel Smith, distillability** | **29.4** | **57.8** |
+| Retro Diffusion Pixel Art Fixer | 76.5 | 89.7 |
 
 The old detector scored below the zero-effort baseline. The current one is a
-large step up but is still a single family of signals; the remaining gap to
-Pixel Art Fixer is mostly heavily-smeared input (pure bilinear/bicubic upscales
-and AI mush), where within-cell variance stops discriminating because a linear
-ramp has the same variance wherever you cut it. Closing that needs genuinely
-independent detectors voting — run-length combs and shift self-similarity —
-rather than more tuning of this one.
+10x improvement and clears the baseline properly, but the per-category split
+shows exactly what kind of detector it is.
+
+Strongest — geometric damage, where the photometry survives:
+
+| Category | Smith | Naive | Fixer |
+|---|---|---|---|
+| `clean_nn` integer upscale | **100%** | 100% | 62% |
+| `fractional` non-integer scale | **100%** | 12% | 88% |
+| `color_field` colour cast | **100%** | 0% | 88% |
+| `subpixel_shift` | 88% | 0% | 88% |
+| `banding` posterised | **88%** | 12% | 75% |
+
+Weakest — heavy photometric damage, where it scores zero:
+
+| Category | Smith | Naive | Fixer |
+|---|---|---|---|
+| `alpha_halo` composite fringe | 0% | 0% | 100% |
+| `dead_cells` wrong native pixels | 0% | 0% | 100% |
+| `cell_texture` painterly infill | 0% | 0% | 100% |
+| `break_outlines` | 0% | 0% | 88% |
+| `ai_upscale` soft + sharpened + glow | 0% | 0% | 62% |
+
+That split is the honest description of within-cell variance as a signal: it
+is structural, so it reads geometry well and dies when the photometry inside
+the cells is destroyed. A smeared cell is locally linear, and a linear ramp
+has the same variance wherever you cut it, so phase — the thing the whole
+method leans on — stops mattering.
+
+Closing that gap needs genuinely independent detectors voting rather than more
+tuning of this one: run-length combs over boundary distances (phase-free, and
+strong exactly where this is weak) and shift self-similarity. Retro Diffusion
+run three cheap detectors and arbitrate when they disagree, which is why they
+lead every category. Note `ai_upscale` at 0% is the most commercially relevant
+miss, since it is literally the input this tool exists for — though the
+smoother, blockier fake art the app is usually handed does work (see the hero
+case in the app test suite).
