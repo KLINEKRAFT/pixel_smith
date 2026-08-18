@@ -269,6 +269,7 @@ Recorded so they are not retried:
 | Octave drop, `loss(s/2)/loss(s)`, as native evidence | AUC 0.55 pooled and 0.28 matched — worse than chance. Both losses sit near zero, so the ratio is noise |
 | Normalising contrast by `sqrt(ln M)`, `ln len`, `len^k` | worse in every size band. Contrast growing with axis length is real signal, not a confound |
 | Spectral null comb (`bench/nulls.mjs`) | 0% on blur, bicubic, downup AND noise — the four it was designed for. sinc nulls are invariant to MULTIPLICATIVE damage but any ADDITIVE noise fills a zero in, and those categories all carry quantisation noise. Also drifts an octave fine, since half a candidate's nulls land on true nulls and nothing punishes the half that do not |
+| Cepstral period estimation (`bench/cepstrum.mjs`) | 0% on every category. Refuted on the EASIEST input: for a clean 5x nearest upscale the cepstrum at the true step ranks 38th of 38 and is negative, while the top quefrencies are 2,3,4 in monotonic decay — the smooth trend of the log spectrum, not periodicity. log\|sinc\| has logarithmic singularities at the nulls, so a box filter smears rather than ringing |
 | Concluding from the 8-image subset (twice) | first time: 69.8% reported against a real 57.3%. Second time: a 77.0-vs-76.5 win over Pixel Art Fixer that was really 66.7 vs 72.4. Constants tuned on 344 samples, a sub-point lead read as real |
 
 ### The remaining gap
@@ -331,7 +332,18 @@ wrong operation.
 So there is no proven route to the remaining 4 points yet. What is known is
 where NOT to spend: per-tile phase freedom (13% of the gap), threshold tuning
 (the guard accounts for 1.7 of 5.7 and is already priced), and any cue built
-on spectral zeros. What would qualify is a statistic that is robust to
-ADDITIVE noise as well as multiplicative attenuation — cepstral peak-picking
-on the log spectrum, or phase-only correlation, are the untested candidates.
-Measure either in isolation on blur/bicubic/downup/noise before integrating.
+on spectral zeros. Cepstral peak-picking was the other candidate and it is dead too: 0%
+everywhere, and refuted on a clean 5x nearest upscale where the true step
+ranks last of 38 quefrencies. Both routes tested here shared an assumption —
+that the answer lives in the FREQUENCY domain of the raw intensity — and both
+failed on the easiest category, which suggests the assumption rather than the
+implementations.
+
+The untested direction that does not share it is spatial: match the image
+against itself under a candidate shift (phase-only or normalised cross-
+correlation of the image with a copy displaced by s). That reads the same
+periodicity without a derivative and without a transform, so it neither
+amplifies the destroyed high band nor depends on spectral fine structure.
+Measure it in isolation on clean_nn FIRST — anything that cannot do clean
+integer upscales is broken, and both dead ideas above would have been caught
+in one minute by that check rather than several by a full sweep.
