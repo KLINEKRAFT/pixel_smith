@@ -69,6 +69,12 @@ Two methods register: `pixelsmith` (shipped behaviour, gates included) and
 `pixelsmith_nogate` (the same detector with the refusal gates removed), which
 separates "the detector was wrong" from "the gate was cautious".
 
+The bridge self-tests on startup and the adapter kills the run if it ever
+dies. Both exist because the extraction list went stale once: `detectGrid`
+threw on every image, the adapter had `stderr=DEVNULL`, and the runner drops
+errored rows from the aggregate — so a completely dead bridge looked like a
+run that was working, for ten minutes.
+
 One difference from the app, deliberately: the bridge reconstructs the **whole
 frame** on the detected grid and does not key out the background, because
 pixel-bench scores the full native canvas. The app additionally crops to the
@@ -88,50 +94,256 @@ it is not actually native.
 
 ## Where we stand
 
-Measured on a 60-sprite synthetic corpus, 8 images × 43 categories:
+The **full** 60-image corpus, 2580 scored inputs, every method scored by
+pixel-bench's own runner in one process:
 
-| Method | Exact % | Grid align % |
+| Method | Exact % | Grid align % | Native-safe % |
+|---|---|---|---|
+| Pixel Smith, old edge-energy comb | 2.9 | 38.2 | - |
+| Naive baseline | 3.7 | 41.7 | 80.0 |
+| Pixel Smith, two detectors + arbiter | 57.3 | 85.0 | 22.5 |
+| **Pixel Smith, coherence ranking + native guard** | **66.7** | **79.1** | **68.3** |
+| Retro Diffusion Pixel Art Fixer | **72.4** | **88.8** | **0.0** |
+
+Two columns of merit, because one of them the benchmark cannot see. Pixel Art
+Fixer is still ahead on exact native size by 5.7 points, and ahead in 30
+categories of 43. It is 0 for 60 on leaving native art alone.
+
+The 5.7 points split cleanly, measured by re-running the full corpus with
+`GRID.NATIVE_R` set to 0:
+
+| Build | Exact % | Native-safe % |
 |---|---|---|
-| Pixel Smith, old edge-energy comb | 2.9 | 38.2 |
-| Naive baseline | 4.4 | 42.5 |
-| **Pixel Smith, distillability** | **29.4** | **57.8** |
-| Retro Diffusion Pixel Art Fixer | 76.5 | 89.7 |
+| Pixel Art Fixer | 72.4 | 0.0 |
+| Pixel Smith, native guard OFF | 68.4 | ~22.5 |
+| Pixel Smith, shipped (`NATIVE_R` 2.0) | 66.7 | 68.3 |
 
-The old detector scored below the zero-effort baseline. The current one is a
-10x improvement and clears the baseline properly, but the per-category split
-shows exactly what kind of detector it is.
+**4.0 points are genuine detector error** — they are still there with the
+guard disabled, and they live entirely in the photometric-damage categories
+below. **1.7 points are what native safety costs**, buying a 45.8-point gain
+in not rewriting the user's own art. Worth it, but a real price, not free.
 
-Strongest — geometric damage, where the photometry survives:
+`NATIVE_R` was tuned on the 8-image subset and has deliberately not been
+re-tuned against the full corpus — doing that would turn the full corpus into
+the tuning set and leave nothing honest to report against.
 
-| Category | Smith | Naive | Fixer |
-|---|---|---|---|
-| `clean_nn` integer upscale | **100%** | 100% | 62% |
-| `fractional` non-integer scale | **100%** | 12% | 88% |
-| `color_field` colour cast | **100%** | 0% | 88% |
-| `subpixel_shift` | 88% | 0% | 88% |
-| `banding` posterised | **88%** | 12% | 75% |
+### Always quote the full corpus
 
-Weakest — heavy photometric damage, where it scores zero:
+`dump_cases.py` produces an 8-image subset for fast iteration. It is **not** a
+substitute for a full run. Measured on that subset the exact-resolution
+comparison read 77.0 for Pixel Smith against 76.5 for Pixel Art Fixer; on all
+60 images it reads 66.7 against 72.4. Ten points, and the sign flipped. A
+0.5-point lead on 344 samples was always inside the noise, and reading it as
+real cost a retracted claim.
 
-| Category | Smith | Naive | Fixer |
-|---|---|---|---|
-| `alpha_halo` composite fringe | 0% | 0% | 100% |
-| `dead_cells` wrong native pixels | 0% | 0% | 100% |
-| `cell_texture` painterly infill | 0% | 0% | 100% |
-| `break_outlines` | 0% | 0% | 88% |
-| `ai_upscale` soft + sharpened + glow | 0% | 0% | 62% |
+This is the second version of the same mistake — see below — so the rule is
+now unconditional: **iterate on the subset, conclude only on the full run.**
 
-That split is the honest description of within-cell variance as a signal: it
-is structural, so it reads geometry well and dies when the photometry inside
-the cells is destroyed. A smeared cell is locally linear, and a linear ramp
-has the same variance wherever you cut it, so phase — the thing the whole
-method leans on — stops mattering.
+### Beware the subset
 
-Closing that gap needs genuinely independent detectors voting rather than more
-tuning of this one: run-length combs over boundary distances (phase-free, and
-strong exactly where this is weak) and shift self-similarity. Retro Diffusion
-run three cheap detectors and arbitrate when they disagree, which is why they
-lead every category. Note `ai_upscale` at 0% is the most commercially relevant
-miss, since it is literally the input this tool exists for — though the
-smoother, blockier fake art the app is usually handed does work (see the hero
-case in the app test suite).
+`pixelbench.runner.run` selects its images with `rng(1234).choice`, NOT the
+first N. `dump_cases.py` replicates that exactly, and it must keep doing so: an
+earlier version took the first N, measured a materially easier subset, and
+reported 69.8% where the real benchmark said 57.3%. Fourteen points of phantom
+progress. If the fast loop and a real `pixelbench run` ever disagree by more
+than a point or two, suspect the subset before suspecting the detector.
+
+### The failure the benchmark cannot see
+
+pixel-bench only ever feeds **upscaled** images. Every method is scored on one
+question — did you find the grid — and nothing in the suite ever asks the
+opposite one: handed art that is *already native*, do you leave it alone?
+
+That is not hypothetical for a sprite tool. It is the most damaging thing
+Pixel Smith can do, and the most silent: a user drops in their own 48x48
+sprite, hits MAKE PIXEL PERFECT, and gets 9x11 back.
+
+`bench/native.mjs` (fast, node, reads the shipped index.html) and
+`bench/native_any.py` (any registered pixel-bench method) measure it over the
+same corpus at 1x. Passing means refused, or a step the app treats as
+already-native.
+
+    node bench/native.mjs corpus
+    PYTHONPATH=pixel-bench ./venv/bin/python bench/native_any.py corpus pixelsmith fixer naive
+
+Pixel Art Fixer halves a native 16x16 sprite to 8x8, and does the equivalent
+on all 60 images. That is defensible for a converter only ever handed AI
+output, and it genuinely buys benchmark score — never refusing cannot cost you
+a detection. It is the wrong default for a tool pointed at the user's own art.
+Its `confidence` field cannot be used to bolt the check on either: on native
+art it reads "medium" 96% of the time, the same as half of genuine upscales,
+so no threshold on it refuses native art without also refusing real upscales.
+
+### Why the residual guard failed, and what replaced it
+
+The old guard was "a real grid is near-lossless, so refuse when the best grid
+destroys too much variance". It does not work, for two independent reasons:
+
+- **Sprites are mostly flat.** Collapsing 4x4 blocks of *native* art also
+  loses almost nothing. Across 116 native axes against 688 upscaled ones the
+  residual measured 0.131 against 0.056 — two clouds on top of each other,
+  AUC 0.80, and barely better than a coin inside the size band where the
+  populations actually overlap.
+- **Noise pushes genuine upscales the wrong way**, past any fixed threshold.
+  `noise` and `chroma_noise` were refused outright, 5 of 8 and 4 of 8.
+
+The honest question is not what a grid costs but whether one is *there*: the
+coherence peak has to stand clear of the incoherent floor of its own spectrum.
+That ratio separates the same two populations at **AUC 0.95**, is noise-
+tolerant because noise lifts peak and floor together, and is computed entirely
+within one image so nothing about scene content or palette leaks in.
+
+**Both axes have to clear it, not either.** An upscale is two-dimensional, so
+a real grid shows up twice; native art that happens to have one periodic
+direction — a dither band, a row of identical tiles — does not. Taking the
+weaker axis rather than the stronger moves the whole trade-off curve outward
+instead of sliding along it, worth about two points of benchmark score at
+equal native-safety, which no amount of tuning the either-axis threshold buys.
+
+Once both axes must agree, the residual test becomes pure cost and is gone:
+removing it was worth 1.1 points of exact for 1.3 points of native-safety, and
+it took `chroma_noise` from 50% to 100%. `noise` is still 0%, but now by
+honest refusal (6 of 8) rather than by confidently answering 5x8 where the
+truth was 32x48 — heavy noise really does drown the coherence peak.
+
+### Choosing the operating point
+
+One constant, `GRID.NATIVE_R`, slides the whole trade-off. On the tuning
+corpus:
+
+| `NATIVE_R` | Native-safe % | Exact % |
+|---|---|---|
+| 1.6 | 58.8 | 76.7 |
+| 1.7 | 66.3 | 76.5 |
+| **2.0** | **86.3** | **75.9** |
+| 2.5 | 96.3 | 72.7 |
+
+(the 2.0 row reads 86.7 / 77.0 once the residual gate is removed as well).
+
+2.0 ships. Raise it if protecting native art matters more than the benchmark:
+a refusal is visible and recoverable — the app says so, and the manual pitch
+override forces a grid — whereas a wrong snap is silent.
+
+### Two corpora, and what the second one showed
+
+`corpus` is characters and tiles; `corpus_val` is items and scenes at roughly
+half the pixel size (min side p10 of 80px against 132px). Held-out exact drops
+to 61.6%, which looks alarming until you slide the threshold on that corpus
+too: from `NATIVE_R` 1.4 to 2.0 the val bench moves 63.4 -> 61.6 while val
+native-safety moves 20 -> 80. The drop is corpus difficulty, not a threshold
+that failed to transfer. Small sprites are simply harder for everyone, which
+is why the head-to-head has to be run per corpus rather than compared across.
+
+### The asymmetry that governs everything
+
+A too-COARSE grid destroys variance, so any fit measure detects it. A too-FINE
+grid fits *perfectly* — splitting one cell into four identical quarters has
+exactly zero residual — so **no goodness-of-fit measure can ever rule it out.**
+
+Rayleigh coherence is structurally immune to the coarse error (if boundaries
+sit at multiples of d then R(d) = 1 and R(2d) ~ 0, because alternate
+boundaries land in antiphase), which is why it replaced the fit-based
+ranking — too-coarse was 166 of 212 axis failures. But it inherits the fine
+side: a soft GCD ties on subdivisions, R(d/2) = R(d) for a perfect lattice, so
+after the change "one octave too fine" became the largest error bucket.
+
+That tie breaks on an asymmetry rather than a threshold. If d is the truth
+then R(2d) is ~0; if the candidate is d/2 then R(2*(d/2)) = R(d) is still
+high. So the ranking walks to the half count while its coherence holds up
+(`GRID.OCT`), judged on coherence only — the variance gate systematically
+favours finer grids and would fight the walk.
+
+### Measured and rejected
+
+Recorded so they are not retried:
+
+| Idea | Result |
+|---|---|
+| Curvature channels in the variance metric | 54% -> 25%; a smeared edge differentiates into a +/- doublet, halving the apparent period |
+| Gradient channels in the same metric | 38%; derivative channels bias the error curve the cap depends on |
+| SHR odd/even octave test | too-fine direction never fired; too-coarse cost 5.5 points |
+| Overriding with tile-integrated steps on drift | -5 to -12 points; per-window YIN is noisier than the global fit |
+| Letting confident axes disagree (to win `nonsquare`) | -11 points; square upscales dominate |
+| Dropping the refusal threshold to answer everything | refusals 191 -> 4, exact 30.8% -> 27.6%; the refusals were honest |
+| Short-run share as extra native evidence | AUC said +0.05 in the matched band; end to end it was 1.5-2 points WORSE at equal native-safety. The proxy lied |
+| Octave drop, `loss(s/2)/loss(s)`, as native evidence | AUC 0.55 pooled and 0.28 matched — worse than chance. Both losses sit near zero, so the ratio is noise |
+| Normalising contrast by `sqrt(ln M)`, `ln len`, `len^k` | worse in every size band. Contrast growing with axis length is real signal, not a confound |
+| Spectral null comb (`bench/nulls.mjs`) | 0% on blur, bicubic, downup AND noise — the four it was designed for. sinc nulls are invariant to MULTIPLICATIVE damage but any ADDITIVE noise fills a zero in, and those categories all carry quantisation noise. Also drifts an octave fine, since half a candidate's nulls land on true nulls and nothing punishes the half that do not |
+| Cepstral period estimation (`bench/cepstrum.mjs`) | 0% on every category. Refuted on the EASIEST input: for a clean 5x nearest upscale the cepstrum at the true step ranks 38th of 38 and is negative, while the top quefrencies are 2,3,4 in monotonic decay — the smooth trend of the log spectrum, not periodicity. log\|sinc\| has logarithmic singularities at the nulls, so a box filter smears rather than ringing |
+| Concluding from the 8-image subset (twice) | first time: 69.8% reported against a real 57.3%. Second time: a 77.0-vs-76.5 win over Pixel Art Fixer that was really 66.7 vs 72.4. Constants tuned on 344 samples, a sub-point lead read as real |
+
+### The remaining gap
+
+`nonsquare` is no longer given up: the cross-axis stage offers independence as
+a third option, priced against the two shared ones by an MDL-style margin
+(`GRID.NONSQ`), since two steps is one more parameter than one. 0% -> 80%.
+
+What is left is one coherent class, and it is where all 5.7 remaining points
+live: **heavy photometric damage**.
+
+| Category | Smith | Fixer |
+|---|---|---|
+| `noise` | 0.0 | 46.7 |
+| `downup` | 43.3 | 75.0 |
+| `blur` | 60.0 | 83.3 |
+| `bicubic` | 70.0 | 86.7 |
+| `heavy_jpeg` | 16.7 | 33.3 |
+| `ai_upscale` | 48.3 | 63.3 |
+
+Coherence reads boundary ENERGY, and low-pass filtering is precisely the
+operation that flattens it: the peak and the incoherent floor converge, so
+both the ranking and the contrast guard lose their grip at once. That is why
+`noise` is 0% by refusal rather than by a wrong answer — an honest failure,
+but a failure.
+
+Against that, Pixel Smith leads exactly where photometry survives and only
+geometry is damaged: `nonsquare` 80.0 vs 55.0, `cell_texture` 95.0 vs 73.3,
+`clean_nn` 93.3 vs 83.3, `cell_noise` 98.3 vs 91.7.
+
+It is NOT a per-tile-freedom problem, and the numbers say so: the categories
+whose grid is genuinely non-uniform — `warp`, `mush_warp`, `drift`, `jitter`,
+`block_reset`, `row_jitter`, `subpixel_shift` — account for only **-31.7 of
+the -246.7** total category deficit. Thirteen percent. The other 87% is
+UNIFORM grids whose photometry has been wrecked. Building per-tile phase
+freedom, the obvious-looking move, would address almost none of the gap.
+
+Nor is it the guard: re-running with `NATIVE_R` = 0 moves `noise` from 0.0 to
+3.3 and `downup` from 43.3 to 46.7. The detector simply cannot see these
+grids.
+
+The cause is visible in `boundaryMaps`: it reads the FIRST and SECOND
+DIFFERENCE of the scanline. Differencing is a high-pass operation — it
+multiplies the spectrum by |1 - e^(-iw)| — so it amplifies precisely the band
+that blur has already destroyed and that noise dominates. Under heavy low-pass
+the coherence peak and the incoherent floor converge, and ranking and guard
+lose their grip together. The signal is being measured where the evidence has
+been deleted.
+
+The obvious repair — a cue that is blur-INVARIANT rather than merely
+blur-tolerant — has been tried and does not work. Upscaling by s convolves
+with a box of width s, multiplying the spectrum by sinc(pi f s), which is
+exactly zero at f = k/s; a later smooth filter multiplies by another envelope
+and cannot move those nulls. `bench/nulls.mjs` implements that comb and scores
+**0% on blur, bicubic, downup and noise**. The flaw is that a null is a ZERO:
+invariant to multiplicative damage, but any ADDITIVE noise fills it in, and
+every one of those categories carries quantisation noise. Invariance to the
+wrong operation.
+
+So there is no proven route to the remaining 4 points yet. What is known is
+where NOT to spend: per-tile phase freedom (13% of the gap), threshold tuning
+(the guard accounts for 1.7 of 5.7 and is already priced), and any cue built
+on spectral zeros. Cepstral peak-picking was the other candidate and it is dead too: 0%
+everywhere, and refuted on a clean 5x nearest upscale where the true step
+ranks last of 38 quefrencies. Both routes tested here shared an assumption —
+that the answer lives in the FREQUENCY domain of the raw intensity — and both
+failed on the easiest category, which suggests the assumption rather than the
+implementations.
+
+The untested direction that does not share it is spatial: match the image
+against itself under a candidate shift (phase-only or normalised cross-
+correlation of the image with a copy displaced by s). That reads the same
+periodicity without a derivative and without a transform, so it neither
+amplifies the destroyed high band nor depends on spectral fine structure.
+Measure it in isolation on clean_nn FIRST — anything that cannot do clean
+integer upscales is broken, and both dead ideas above would have been caught
+in one minute by that check rather than several by a full sweep.
