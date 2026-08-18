@@ -59,7 +59,7 @@ class ImageDataShim {
 const FNS = ['collect','medianCut','chRange','spread','widest','avg','mapPalette',
              'labelComponents','opaqueMask','contentBox','bboxOf',
              'gridPalette','gridQuant','gridLines','gridSums','gridEnergy',
-             'distillAxis','pickStep','distScoreCurve','distAt','trendAt','detectAxis','detectGrid','yinCurve','yinAt','nyquistFraction',
+             'distillAxis','pickStep','distScoreCurve','distAt','trendAt','detectAxis','detectGrid','yinCurve','yinAt','lossAt','tileStep',
              'boundaryProfile','yinPeriod','detectYinAxis'];
 const CONSTS = ['RING','ORTH','clamp','GRID','GB'];
 const api = new Function('ImageDataShim',

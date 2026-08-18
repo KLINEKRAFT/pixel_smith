@@ -88,50 +88,74 @@ it is not actually native.
 
 ## Where we stand
 
-Measured on a 60-sprite synthetic corpus, 8 images × 43 categories:
+Measured on a 20-sprite synthetic corpus, 8 images x 43 categories, all methods
+on identical inputs:
 
 | Method | Exact % | Grid align % |
 |---|---|---|
 | Pixel Smith, old edge-energy comb | 2.9 | 38.2 |
-| Naive baseline | 4.4 | 42.5 |
-| **Pixel Smith, distillability** | **29.4** | **57.8** |
-| Retro Diffusion Pixel Art Fixer | 76.5 | 89.7 |
+| Naive baseline | 2.3 | 39.8 |
+| **Pixel Smith, two detectors + arbiter** | **57.3** | **85.0** |
+| Retro Diffusion Pixel Art Fixer | **77.3** | **90.9** |
 
-The old detector scored below the zero-effort baseline. The current one is a
-10x improvement and clears the baseline properly, but the per-category split
-shows exactly what kind of detector it is.
+A 20x improvement on where this started, and grid alignment is now within six
+points of Pixel Art Fixer. Exact native size is still 20 points behind, which
+is the number that matters most, so this is not yet a win.
 
-Strongest — geometric damage, where the photometry survives:
+### Beware the subset
 
-| Category | Smith | Naive | Fixer |
-|---|---|---|---|
-| `clean_nn` integer upscale | **100%** | 100% | 62% |
-| `fractional` non-integer scale | **100%** | 12% | 88% |
-| `color_field` colour cast | **100%** | 0% | 88% |
-| `subpixel_shift` | 88% | 0% | 88% |
-| `banding` posterised | **88%** | 12% | 75% |
+`pixelbench.runner.run` selects its images with `rng(1234).choice`, NOT the
+first N. `dump_cases.py` replicates that exactly, and it must keep doing so: an
+earlier version took the first N, measured a materially easier subset, and
+reported 69.8% where the real benchmark said 57.3%. Fourteen points of phantom
+progress. If the fast loop and a real `pixelbench run` ever disagree by more
+than a point or two, suspect the subset before suspecting the detector.
 
-Weakest — heavy photometric damage, where it scores zero:
+### What each detector is for
 
-| Category | Smith | Naive | Fixer |
-|---|---|---|---|
-| `alpha_halo` composite fringe | 0% | 0% | 100% |
-| `dead_cells` wrong native pixels | 0% | 0% | 100% |
-| `cell_texture` painterly infill | 0% | 0% | 100% |
-| `break_outlines` | 0% | 0% | 88% |
-| `ai_upscale` soft + sharpened + glow | 0% | 0% | 62% |
+Two signals with different physics, because they fail on different images:
 
-That split is the honest description of within-cell variance as a signal: it
-is structural, so it reads geometry well and dies when the photometry inside
-the cells is destroyed. A smeared cell is locally linear, and a linear ramp
-has the same variance wherever you cut it, so phase — the thing the whole
-method leans on — stops mattering.
+| | distillability | YIN on the boundary profile |
+|---|---|---|
+| reads | within-cell variance | period of the second-difference impulse train |
+| `clean_nn` | 100% | 0% |
+| `soft_bilinear` | 0% | 50% |
+| `dead_cells` | 0% | 38% |
+| `drift` | 0% | 38% |
 
-Closing that gap needs genuinely independent detectors voting rather than more
-tuning of this one: run-length combs over boundary distances (phase-free, and
-strong exactly where this is weak) and shift self-similarity. Retro Diffusion
-run three cheap detectors and arbitrate when they disagree, which is why they
-lead every category. Note `ai_upscale` at 0% is the most commercially relevant
-miss, since it is literally the input this tool exists for — though the
-smoother, blockier fake art the app is usually handed does work (see the hero
-case in the app test suite).
+Neither dominates. Fusing them took 30.8% to 52.3% on the old subset; the
+arbiter lets both score every candidate, including each proposal's half and
+double, because the cheapest way to fix one detector's octave slip is to ask a
+detector with different physics which octave it prefers.
+
+### The asymmetry that governs everything
+
+A too-COARSE grid destroys variance, so any fit measure detects it. A too-FINE
+grid fits *perfectly* - splitting one cell into four identical quarters has
+exactly zero residual - so **no goodness-of-fit measure can ever rule it out.**
+Fit kills one side; only a complexity penalty kills the other. That is why the
+selection pays for cells (MDL) rather than simply preferring the smallest
+plausible step, which fell straight through to the minimum step on ghosted
+composites.
+
+### Measured and rejected
+
+Recorded so they are not retried:
+
+| Idea | Result |
+|---|---|
+| Curvature channels in the variance metric | 54% -> 25%; a smeared edge differentiates into a +/- doublet, halving the apparent period |
+| Gradient channels in the same metric | 38%; derivative channels bias the error curve the cap depends on |
+| SHR odd/even octave test | too-fine direction never fired; too-coarse cost 5.5 points |
+| Overriding with tile-integrated steps on drift | -5 to -12 points; per-window YIN is noisier than the global fit |
+| Letting confident axes disagree (to win `nonsquare`) | -11 points; square upscales dominate |
+| Dropping the refusal threshold to answer everything | refusals 191 -> 4, exact 30.8% -> 27.6%; the refusals were honest |
+
+### The remaining gap
+
+Weakest categories are `nonsquare` (given up deliberately), `warp`, `mush_warp`,
+`block_reset` and `drift` - every one a grid that is not globally uniform, where
+no single (step, phase) fits and the global fit collapses rather than degrades.
+Pixel Art Fixer handles these with per-tile phase freedom and local step
+integration across three independent detectors with deliberately opposite
+octave biases. Closing the last 20 points means building that, not tuning this.

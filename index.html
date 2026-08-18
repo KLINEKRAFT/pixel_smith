@@ -1180,8 +1180,9 @@ const GRID = {
   YIN_MAX:   0.85,   // no dip better than this means no periodic structure
   FUSE_FLOOR: 0.30,  // combined evidence below this is not a grid
   STRONG:    99,     // effectively off; see the note in detectGrid
-  NATIVE_F:  0.55,   // adjacent pixels differing this often = already native
-  HYG:       0.92,   // harmonic hygiene: take the smallest step within this band
+  NATIVE_LOSS: 0.30, // a grid destroying more than this is not a grid
+  HYG:       0.20,   // candidates within this band of the best are shortlisted
+  MDL:       2.0,    // price of a cell, in residual-log units
   D_STRONG:  999,    // off: measured, suppressing YIN costs more than it saves
   QUANT_K:  14,      // flatten AA/mush ramps before measuring variance
   ERR_TOL:  0.020,   // how far above the floor still counts as lossless
@@ -1646,53 +1647,24 @@ function pickStep(A){
  * and a confidence. Per-axis matters: non-square upscales are common, and a
  * single global pitch cannot express them at all.
  */
-/**
- * Is this art already at native resolution?
- * An upscaled image repeats each source pixel across a whole cell, so only
- * about one adjacent pair in `step` actually differs. Art that is already
- * native changes at almost every step — it has energy right up at Nyquist.
- * That is a direct physical discriminator, independent of any periodicity
- * score, and it is the one thing the benchmark cannot teach: every input in
- * pixel-bench is upscaled, so a detector tuned only on it learns to never
- * refuse, and then quietly destroys the native art a user drops in.
- */
-function nyquistFraction(img, box){
-  const {x0, y0, cw, ch} = box;
-  const sd = img.data, sw = img.width;
-  const TOL = 24;                       /* below this is noise, not a new pixel */
-  let diff = 0, n = 0;
-  const sy = Math.max(1, Math.floor(ch/64)), sx = Math.max(1, Math.floor(cw/64));
-  for(let y=0; y<ch; y+=sy){
-    for(let x=1; x<cw; x++){
-      const a = ((y0+y)*sw + x0+x)*4, b = a-4;
-      if(sd[a+3] < 128 && sd[b+3] < 128) continue;
-      const d = Math.abs(sd[a]-sd[b]) + Math.abs(sd[a+1]-sd[b+1]) + Math.abs(sd[a+2]-sd[b+2])
-              + Math.abs(sd[a+3]-sd[b+3]);
-      if(d > TOL) diff++;
-      n++;
-    }
-  }
-  for(let x=0; x<cw; x+=sx){
-    for(let y=1; y<ch; y++){
-      const a = ((y0+y)*sw + x0+x)*4, b = a - sw*4;
-      if(sd[a+3] < 128 && sd[b+3] < 128) continue;
-      const d = Math.abs(sd[a]-sd[b]) + Math.abs(sd[a+1]-sd[b+1]) + Math.abs(sd[a+2]-sd[b+2])
-              + Math.abs(sd[a+3]-sd[b+3]);
-      if(d > TOL) diff++;
-      n++;
-    }
-  }
-  return n ? diff/n : 0;
-}
-
 function detectGrid(img, box){
-  /* Refuse before doing any work if the art is already native: there is no
-     grid to find, and "detecting" one can only destroy it. */
-  if(nyquistFraction(img, box) > GRID.NATIVE_F) return null;
   const QP = gridPalette(img, box);
   const ax = detectAxis(img, box, QP, 0);
   const ay = detectAxis(img, box, QP, 1);
   if(!ax && !ay) return null;
+  /* ALREADY-NATIVE GUARD.
+     Every input in pixel-bench is upscaled, so a detector tuned only on it
+     learns to never refuse and then destroys the native art a user drops in
+     (measured: a 48x48 native sprite came back as 12x19). The test is
+     physical: a real grid is near-LOSSLESS, because each cell really was one
+     source pixel. On art that is already native, every step >= 2 averages
+     genuinely different pixels together, so the best available grid still
+     destroys a large share of the variance. Counting how often adjacent
+     pixels differ does NOT work for this - measured, native art scores 0.19
+     and noisy upscaled art 0.63, the wrong way round, because real sprites
+     have large flat regions. */
+  const loss = Math.min(ax ? ax.loss : 1, ay ? ay.loss : 1);
+  if(loss > GRID.NATIVE_LOSS) return null;
   let sx = ax ? ax.s : ay.s;
   let sy = ay ? ay.s : ax.s;
   const con = Math.min(ax ? ax.score : 1, ay ? ay.score : 1);
@@ -1722,18 +1694,17 @@ function detectGrid(img, box){
        reconciling repairs a weak axis far more often than it breaks a real
        non-square one — allowing independence at every confidence threshold
        tried took 58.4% down to 47.1% or worse. The nonsquare category is
-       given up deliberately, not by oversight. */
-    if(ax.score >= GRID.STRONG && ay.score >= GRID.STRONG){
-      /* both confident: keep the axes independent */
-    } else {
-      const rel = Math.abs(ax.score - ay.score)/Math.max(1e-9, Math.max(ax.score, ay.score));
-      if(rel > 0.35){                     /* one axis clearly knows better */
-        const s = ax.score > ay.score ? ax.s : ay.s;
-        sx = s; sy = s;
-      } else {
-        const fine = Math.min(sx, sy); sx = fine; sy = fine;
-      }
-    }
+       given up deliberately, not by oversight.
+
+       Which step to share is decided by JOINT evidence: ask both axes what
+       they think of each candidate and keep the one the image as a whole
+       supports. Trusting whichever axis reported the higher confidence does
+       not work — that score saturates when a single axis's two detectors
+       agree, so a confidently wrong axis outranks a correct one. */
+    const jx = ax.judge(sx) + ay.judge(sx);
+    const jy = ax.judge(sy) + ay.judge(sy);
+    const s = jx >= jy ? sx : sy;
+    sx = s; sy = s;
   }
   const {cw, ch} = box;
   return {
@@ -1766,6 +1737,75 @@ function detectGrid(img, box){
  * candidates and cannot outvote one that is discriminating sharply. That is
  * self-weighting: confidence is expressed as contrast, not as a tuned weight.
  */
+/**
+ * TILE-INTEGRATED STEP — for grids that are not globally uniform.
+ *
+ * A drifting, warped or block-reset grid has no single (step, phase) that fits
+ * the whole axis, and forcing one does not merely lose precision: the fit
+ * collapses and the answer comes back wildly coarse (a 24x24 sprite under
+ * mush_warp was being called 7x7). But the grid is still locally regular, so
+ * estimate the step in each of a few windows and integrate the CELL COUNTS
+ * rather than averaging the steps:
+ *
+ *     cells = sum over tiles of tileLen / step_tile
+ *
+ * Summing counts is the right operation because cells are what tile together;
+ * averaging steps would let one bad window drag the whole estimate, and a
+ * harmonic mean over unequal windows is not what the geometry says. The median
+ * across tiles guards the rest.
+ *
+ * This rides on YIN rather than distillability because it has to run several
+ * times per axis and YIN is two orders of magnitude cheaper.
+ */
+function tileStep(img, box, axis, nTiles){
+  const {x0, y0, cw, ch} = box;
+  const len = axis === 0 ? cw : ch;
+  const tl = Math.floor(len/nTiles);
+  if(tl < 24) return null;
+  const lo = Math.max(GRID.MIN_STEP, tl/GRID.MAX_NATIVE);
+  const hi = Math.min(GRID.MAX_STEP, tl/4);
+  if(hi <= lo) return null;
+  const per = [];
+  for(let t=0; t<nTiles; t++){
+    const sub = axis === 0
+      ? {x0: x0 + t*tl, y0, cw: tl, ch}
+      : {x0, y0: y0 + t*tl, cw, ch: tl};
+    const p = boundaryProfile(img, sub, axis);
+    if(!p) continue;
+    const r = yinPeriod(p, lo, hi);
+    if(r && r.period >= lo && r.period <= hi) per.push(r.period);
+  }
+  if(per.length < Math.max(2, nTiles-1)) return null;
+  /* median of the per-tile cell densities, then scaled back to a step */
+  const dens = per.map(s => 1/s).sort((a,b) => a-b);
+  const md = dens[dens.length >> 1];
+  if(!(md > 0)) return null;
+  const s = 1/md;
+  if(s < GRID.MIN_STEP || s > GRID.MAX_STEP) return null;
+  /* how much the windows disagree — the direct evidence that the grid is not
+     globally uniform, which no global score can express */
+  let mu = 0;
+  for(const d of dens) mu += d;
+  mu /= dens.length;
+  let v = 0;
+  for(const d of dens) v += (d-mu)*(d-mu);
+  const cv = mu > 0 ? Math.sqrt(v/dens.length)/mu : 0;
+  return {s, cv, n: per.length};
+}
+
+/** How much of the axis variance a grid at this step would destroy, at its
+ *  best phase. Absolute, not relative to a trend — used to tell "this is the
+ *  grid" from "this is the least-bad way to wreck the image". */
+function lossAt(A, s){
+  const nph = Math.max(8, Math.min(GRID.MAX_PHASE, Math.round(2*s))) & ~1;
+  let best = -Infinity;
+  for(let j=0; j<nph; j++){
+    const v = gridEnergy(A.S, A.lines, A.len, s, j*s/nph);
+    if(v > best) best = v;
+  }
+  return (A.Qtot - best)/A.T;
+}
+
 function detectAxis(img, box, QP, axis){
   const len = axis === 0 ? box.cw : box.ch;
   const A  = distillAxis(img, box, QP, axis);
@@ -1790,6 +1830,10 @@ function detectAxis(img, box, QP, axis){
   if(yc){
     const p = boundaryProfile(img, box, axis);
     if(p){ const r = yinPeriod(p, lo, hi); if(r) props.push(r.period); }
+    for(const k of [3, 5]){
+      const ts = tileStep(img, box, axis, k);
+      if(ts) props.push(ts.s);
+    }
     for(let T=3; T<yc.hi-1; T++){
       if(yc.dp[T] < yc.dp[T-1] && yc.dp[T] <= yc.dp[T+1] && yc.dp[T] < GRID.YIN_MAX) props.push(T);
     }
@@ -1833,11 +1877,27 @@ function detectAxis(img, box, QP, axis){
   });
   for(let i=0; i<cands.length; i++) if(total[i] > bs){ bs = total[i]; bi = i; }
 
-  /* Harmonic hygiene, applied last: among candidates within a whisker of the
-     winner, take the smallest. A submultiple subdivides losslessly and a
-     too-fine grid is recoverable; content scale is always coarser than the
-     pixel grid and a too-coarse grid has already thrown detail away. */
-  for(let i=0; i<bi; i++) if(total[i] >= bs*GRID.HYG){ bi = i; break; }
+  /* COMPLEXITY PENALTY (MDL), applied among the near-winners.
+     The two octave directions are not symmetric. A too-COARSE grid destroys
+     variance, so fit detects it easily. A too-FINE grid fits perfectly —
+     splitting one cell into four identical quarters has exactly zero residual
+     — so no goodness-of-fit measure can ever rule it out. Preferring the
+     smallest near-winner therefore has no floor, and it fell straight through
+     to the minimum step on ghosted composites (subpixel_shift landed on
+     step 2.0 for a true step of 4.1).
+     So instead of "take the smallest", pay for cells: describing the image as
+     n cells costs about n units, and the residual costs about (len/2)·log(err).
+     A finer grid must reduce the residual enough to pay for the extra cells,
+     and a merely-subdividing grid reduces it by nothing. */
+  const slack = bs*GRID.HYG;
+  let bestCost = Infinity, bj = bi;
+  for(let i=0; i<cands.length; i++){
+    if(total[i] < slack) continue;
+    const e = A ? lossAt(A, cands[i]) : 0.5;
+    const cost = 0.5*Math.log(e + 1e-4) + GRID.MDL/cands[i];
+    if(cost < bestCost){ bestCost = cost; bj = i; }
+  }
+  bi = bj;
 
   if(bs < GRID.FUSE_FLOOR) return null;
 
@@ -1887,7 +1947,28 @@ function detectAxis(img, box, QP, axis){
     if(v > bnScore){ bnScore = v; bn = ss[i]; }
   }
   s = bn;
-  return {s, score: bs, err: A ? 0 : null};
+
+  /* Two things were tried here and removed, recorded so they are not retried:
+     · A subharmonic-to-harmonic (odd/even line evidence) octave test. The
+       too-fine direction never changed an answer, because the integer-count
+       snap and the MDL penalty already prevent landing there; the too-coarse
+       direction cost 5.5 points by firing on correct steps.
+     · Overriding the global answer with the tile-integrated one whenever the
+       windows disagreed. Per-window YIN on a quarter-length window is noisier
+       than the global fit, so believing it lost 5-12 points at every
+       disagreement threshold tried. The tile estimate earns its keep as a
+       CANDIDATE, judged like any other, and not as an override. */
+  /* A closure so the cross-axis stage can ask THIS axis what it thinks of a
+     step it never proposed. Comparing the two axes' own confidences does not
+     work: the fused score saturates at its maximum whenever both detectors
+     happen to peak together, which says nothing about absolute quality. */
+  const judge = q => {
+    if(q < lo || q > hi) return 0;
+    const d = dMax > 0 ? Math.max(0, distAt(A, scored, q))/dMax : 0;
+    const y = yMax > 0 ? yinAt(yc, q)/yMax : 0;
+    return d + y;
+  };
+  return {s, score: bs, loss: A ? lossAt(A, s) : 0, judge};
 }
 
 /* ---- rebuild at one true pixel per detected block ---- */

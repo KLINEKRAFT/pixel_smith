@@ -62,7 +62,7 @@ function grabConst(name){
 
 const FNS = ['cloneImg','hardAlpha','collect','medianCut','chRange','spread','widest','avg',
              'mapPalette','labOf','labDist2','hasAlpha','keyOut','keyPockets',
-             'snapGrid','labelComponents','opaqueMask','nyquistFraction',
+             'snapGrid','labelComponents','opaqueMask','lossAt','tileStep',
              'boundaryProfile','yinPeriod','detectYinAxis','yinCurve','yinAt',
              'distScoreCurve','distAt','trendAt','detectAxis',
              'contentBox','bboxOf','mergeNearColors','cleanIsolated','fillPinholes',
@@ -149,13 +149,10 @@ process.stdin.on('data', chunk => {
 });
 process.stdin.on('end', () => process.exit(0));
 
-/* Self-test before accepting any work.
-   The extraction lists above name functions in index.html; when the app
-   renames one, a stale list silently yields a bridge that throws on every
-   request. Falling back to "return the source" then looks exactly like a
-   detector that refuses everything — it scored this harness 0.0% exact once,
-   which cost more time than the bug did. So prove the pipeline runs, on a
-   synthetic 8x checkerboard whose answer is known, before reporting ready. */
+/* Self-test before accepting any work: a stale extraction list otherwise
+   yields a bridge that throws on every request and falls back to "return the
+   source", which looks exactly like a detector refusing everything. That
+   scored this harness 0.0% exact once. */
 (function selfTest(){
   const N = 16, S8 = 8, W = N*S8;
   const img = new ImageDataShim(W, W);
