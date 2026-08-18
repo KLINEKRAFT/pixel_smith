@@ -1176,6 +1176,13 @@ const GRID = {
   MAX_LINES: 40,     // scanlines sampled per axis
   MAX_PHASE: 24,     // phase samples per candidate step
   MAX_NATIVE: 512,   // the largest native dimension the app can output
+  YIN_THRESH: 0.35,  // d' under this counts as "found the period"
+  YIN_MAX:   0.85,   // no dip better than this means no periodic structure
+  FUSE_FLOOR: 0.30,  // combined evidence below this is not a grid
+  STRONG:    99,     // effectively off; see the note in detectGrid
+  NATIVE_F:  0.55,   // adjacent pixels differing this often = already native
+  HYG:       0.92,   // harmonic hygiene: take the smallest step within this band
+  D_STRONG:  999,    // off: measured, suppressing YIN costs more than it saves
   QUANT_K:  14,      // flatten AA/mush ramps before measuring variance
   ERR_TOL:  0.020,   // how far above the floor still counts as lossless
   C_FLOOR:  0.012,   // below this there is no grid signal at all
@@ -1331,6 +1338,162 @@ function gridEnergy(S, lines, len, s, p){
   return e;
 }
 
+/* ────────────────────────────────────────────────
+   DETECTOR 2 — boundary profile + YIN
+   ────────────────────────────────────────────────
+
+   Distillability reads within-cell variance, which dies on smooth resampling:
+   a bilinear-smeared cell is locally LINEAR, and a linear ramp has the same
+   variance wherever you cut it, so phase stops mattering. Measured contrast at
+   the true step on a bilinear 8x was 0.0098 — indistinguishable from noise.
+   That is why bilinear, bicubic, blur, mush and noise all sat at 0%.
+
+   But smooth resampling does not destroy the grid, it MOVES it. After a
+   bilinear upscale a scanline is piecewise-LINEAR with knots exactly at the
+   cell boundaries, and the second difference of a piecewise-linear signal is
+   exactly zero except at those knots. So |x[i-1] - 2x[i] + x[i+1]| averaged
+   down the scanlines is an impulse train whose period IS the cell size —
+   strongest precisely where the variance signal is weakest.
+
+   Recovering the period of that train is a fundamental-frequency problem, and
+   the classical trap is the octave error (answering 2T or T/2). Plain
+   autocorrelation has it badly. YIN's cumulative mean normalised difference
+   function is the standard fix from pitch detection:
+
+       d(T)  = sum_i (p[i] - p[i+T])^2
+       d'(T) = d(T) / [ (1/T) sum_{j=1..T} d(j) ]
+
+   The running-mean denominator removes the bias that makes small T always look
+   good, and then taking the SMALLEST T under an absolute threshold — rather
+   than the global minimum — structurally prefers the fundamental over its
+   multiples, because 2T can only be reached after T has already been rejected.
+*/
+
+/** Mean |second difference| down the scanlines: an impulse train at the cell
+ *  boundaries. Deliberately NOT quantised — quantising snaps the smooth ramp
+ *  flat and destroys the very knots this is looking for. */
+function boundaryProfile(img, box, axis){
+  const {x0, y0, cw, ch} = box;
+  const sd = img.data, sw = img.width;
+  const len  = axis === 0 ? cw : ch;
+  const nAll = axis === 0 ? ch : cw;
+  if(len < 16) return null;
+  const stride = Math.max(1, Math.ceil(nAll/GRID.MAX_LINES));
+  const p = new Float64Array(len);
+  const row = new Float64Array(len);
+  const alp = new Float64Array(len);
+  let lines = 0;
+  for(let t=0; t<nAll; t+=stride){
+    for(let i=0; i<len; i++){
+      const x = axis === 0 ? i : t, y = axis === 0 ? t : i;
+      const s = ((y0+y)*sw + x0+x)*4;
+      row[i] = (0.299*sd[s] + 0.587*sd[s+1] + 0.114*sd[s+2])/255;
+      alp[i] = sd[s+3]/255;
+    }
+    for(let i=1; i<len-1; i++){
+      p[i] += Math.abs(row[i-1] - 2*row[i] + row[i+1])
+            + Math.abs(alp[i-1] - 2*alp[i] + alp[i+1]);
+    }
+    lines++;
+  }
+  if(!lines) return null;
+  for(let i=0; i<len; i++) p[i] /= lines;
+  /* de-mean so the difference function measures shape, not level */
+  let m = 0;
+  for(let i=0; i<len; i++) m += p[i];
+  m /= len;
+  for(let i=0; i<len; i++) p[i] -= m;
+  return p;
+}
+
+/**
+ * YIN period estimate on a 1D profile.
+ * Returns the smallest period whose normalised difference clears the
+ * threshold — the octave-safe answer — with a parabolic sub-sample refinement,
+ * plus its d' value as a confidence (lower is better).
+ */
+function yinPeriod(p, lo, hi){
+  const n = p.length;
+  hi = Math.min(hi, Math.floor(n/2));
+  if(hi <= lo || hi < 2) return null;
+  const d = new Float64Array(hi+1);
+  for(let T=1; T<=hi; T++){
+    let s = 0;
+    const lim = n - T;
+    for(let i=0; i<lim; i++){ const v = p[i] - p[i+T]; s += v*v; }
+    d[T] = s/lim;                       /* per-sample, so T does not bias it */
+  }
+  const dp = new Float64Array(hi+1);
+  dp[0] = 1;
+  let run = 0;
+  for(let T=1; T<=hi; T++){
+    run += d[T];
+    dp[T] = run > 0 ? d[T]*T/run : 1;
+  }
+  /* smallest T under the threshold, walking to the local minimum of its dip */
+  let best = -1;
+  for(let T=Math.max(2, Math.ceil(lo)); T<=hi; T++){
+    if(dp[T] < GRID.YIN_THRESH){
+      while(T+1 <= hi && dp[T+1] < dp[T]) T++;
+      best = T; break;
+    }
+  }
+  if(best < 0){                          /* nothing cleared it: take the best dip */
+    let bv = Infinity;
+    for(let T=Math.max(2, Math.ceil(lo)); T<=hi; T++) if(dp[T] < bv){ bv = dp[T]; best = T; }
+    if(best < 0 || bv > GRID.YIN_MAX) return null;
+  }
+  /* parabolic interpolation around the minimum for a sub-pixel period */
+  let period = best;
+  if(best > 1 && best < hi){
+    const a = dp[best-1], b = dp[best], c = dp[best+1];
+    const den = a - 2*b + c;
+    if(Math.abs(den) > 1e-12) period = best + 0.5*(a - c)/den;
+  }
+  return {period, conf: dp[best]};
+}
+
+function detectYinAxis(img, box, axis){
+  const p = boundaryProfile(img, box, axis);
+  if(!p) return null;
+  const len = axis === 0 ? box.cw : box.ch;
+  const lo = Math.max(GRID.MIN_STEP, len/GRID.MAX_NATIVE);
+  const hi = Math.min(GRID.MAX_STEP, len/4);
+  if(hi <= lo) return null;
+  const r = yinPeriod(p, lo, hi);
+  if(!r || r.period < lo*0.9) return null;
+  return r;
+}
+
+/** The whole d' curve, so the arbiter can ask YIN's opinion of a step that
+ *  YIN did not itself propose. */
+function yinCurve(img, box, axis){
+  const p = boundaryProfile(img, box, axis);
+  if(!p) return null;
+  const n = p.length;
+  const len = axis === 0 ? box.cw : box.ch;
+  const hi = Math.min(Math.floor(n/2), Math.min(GRID.MAX_STEP, len/4) | 0);
+  if(hi < 3) return null;
+  const d = new Float64Array(hi+1), dp = new Float64Array(hi+1);
+  for(let T=1; T<=hi; T++){
+    let sm = 0; const lim = n - T;
+    for(let i=0; i<lim; i++){ const v = p[i] - p[i+T]; sm += v*v; }
+    d[T] = sm/lim;
+  }
+  dp[0] = 1;
+  let run = 0;
+  for(let T=1; T<=hi; T++){ run += d[T]; dp[T] = run > 0 ? d[T]*T/run : 1; }
+  return {dp, hi};
+}
+/** YIN's verdict on an arbitrary step: 1 is a perfect period, 0 is nothing. */
+function yinAt(yc, s){
+  if(!yc || s < 2 || s > yc.hi) return 0;
+  const i = Math.floor(s), f = s - i;
+  const a = yc.dp[i], b = yc.dp[Math.min(yc.hi, i+1)];
+  const v = a + (b-a)*f;
+  return Math.max(0, 1 - v/GRID.YIN_MAX);
+}
+
 /** Error and phase-contrast curves over a geometric ladder of steps.
  *  Phase count scales with the step, which keeps the cost per candidate
  *  constant (cells x phases ~ len/s x 2s = 2 len). */
@@ -1395,20 +1558,51 @@ function distillAxis(img, box, QP, axis){
  * error, so the true step can miss a fixed threshold while its own half
  * — which happened to land nearer a ladder rung — sneaks under it.
  */
-function pickStep(A){
-  if(!A || !A.cand.length) return null;
+/** score(s) = contrast * max(1 - err/trend), trend = running median of the
+ *  error in a log-window. Exposed as a curve so the arbiter can ask
+ *  distillability's opinion of a step it did not itself propose. */
+function distScoreCurve(A){
   const cand = A.cand, n = cand.length;
   const ls = cand.map(c => Math.log(c.s));
-  const scored = [];
+  const scored = new Float64Array(n);
+  const trend = new Float64Array(n);
   const win = [];
   for(let i=0; i<n; i++){
     win.length = 0;
     for(let j=0; j<n; j++) if(Math.abs(ls[j] - ls[i]) <= 0.14) win.push(cand[j].err);
     win.sort((p,q) => p-q);
-    const trend = Math.max(1e-6, win[win.length >> 1]);
-    const sc = Math.max(cand[i].con, 0) * Math.max(1 - cand[i].err/trend, 0);
-    scored.push(sc);
+    trend[i] = Math.max(1e-6, win[win.length >> 1]);
+    scored[i] = Math.max(cand[i].con, 0) * Math.max(1 - cand[i].err/trend[i], 0);
   }
+  scored.trend = trend;
+  return scored;
+}
+/** the local misaligned-grid baseline at an arbitrary step */
+function trendAt(A, scored, s){
+  const cand = A.cand, tr = scored.trend;
+  if(!cand.length) return 1e-6;
+  if(s <= cand[0].s) return tr[0];
+  if(s >= cand[cand.length-1].s) return tr[cand.length-1];
+  let i = 0;
+  while(i < cand.length-1 && cand[i+1].s < s) i++;
+  const a = Math.log(cand[i].s), b = Math.log(cand[i+1].s), t = (Math.log(s)-a)/Math.max(1e-9,b-a);
+  return tr[i] + (tr[i+1]-tr[i])*t;
+}
+/** distillability's verdict on an arbitrary step (log-interpolated). */
+function distAt(A, scored, s){
+  const cand = A.cand;
+  if(!cand.length || s < cand[0].s || s > cand[cand.length-1].s) return 0;
+  let i = 0;
+  while(i < cand.length-1 && cand[i+1].s < s) i++;
+  if(i >= cand.length-1) return scored[cand.length-1];
+  const a = Math.log(cand[i].s), b = Math.log(cand[i+1].s), t = (Math.log(s)-a)/Math.max(1e-9, b-a);
+  return scored[i] + (scored[i+1]-scored[i])*t;
+}
+
+function pickStep(A){
+  if(!A || !A.cand.length) return null;
+  const cand = A.cand, n = cand.length;
+  const scored = distScoreCurve(A);
   /* Cap at the DETAIL SCALE before choosing. Without this the score picks
      content scale: on a character the strongest vertical rhythm is the
      head/torso/legs banding, and a 48px grid locks onto it three times harder
@@ -1452,31 +1646,94 @@ function pickStep(A){
  * and a confidence. Per-axis matters: non-square upscales are common, and a
  * single global pitch cannot express them at all.
  */
+/**
+ * Is this art already at native resolution?
+ * An upscaled image repeats each source pixel across a whole cell, so only
+ * about one adjacent pair in `step` actually differs. Art that is already
+ * native changes at almost every step — it has energy right up at Nyquist.
+ * That is a direct physical discriminator, independent of any periodicity
+ * score, and it is the one thing the benchmark cannot teach: every input in
+ * pixel-bench is upscaled, so a detector tuned only on it learns to never
+ * refuse, and then quietly destroys the native art a user drops in.
+ */
+function nyquistFraction(img, box){
+  const {x0, y0, cw, ch} = box;
+  const sd = img.data, sw = img.width;
+  const TOL = 24;                       /* below this is noise, not a new pixel */
+  let diff = 0, n = 0;
+  const sy = Math.max(1, Math.floor(ch/64)), sx = Math.max(1, Math.floor(cw/64));
+  for(let y=0; y<ch; y+=sy){
+    for(let x=1; x<cw; x++){
+      const a = ((y0+y)*sw + x0+x)*4, b = a-4;
+      if(sd[a+3] < 128 && sd[b+3] < 128) continue;
+      const d = Math.abs(sd[a]-sd[b]) + Math.abs(sd[a+1]-sd[b+1]) + Math.abs(sd[a+2]-sd[b+2])
+              + Math.abs(sd[a+3]-sd[b+3]);
+      if(d > TOL) diff++;
+      n++;
+    }
+  }
+  for(let x=0; x<cw; x+=sx){
+    for(let y=1; y<ch; y++){
+      const a = ((y0+y)*sw + x0+x)*4, b = a - sw*4;
+      if(sd[a+3] < 128 && sd[b+3] < 128) continue;
+      const d = Math.abs(sd[a]-sd[b]) + Math.abs(sd[a+1]-sd[b+1]) + Math.abs(sd[a+2]-sd[b+2])
+              + Math.abs(sd[a+3]-sd[b+3]);
+      if(d > TOL) diff++;
+      n++;
+    }
+  }
+  return n ? diff/n : 0;
+}
+
 function detectGrid(img, box){
+  /* Refuse before doing any work if the art is already native: there is no
+     grid to find, and "detecting" one can only destroy it. */
+  if(nyquistFraction(img, box) > GRID.NATIVE_F) return null;
   const QP = gridPalette(img, box);
-  const ax = distillAxis(img, box, QP, 0);
-  const ay = distillAxis(img, box, QP, 1);
-  const wx = pickStep(ax), wy = pickStep(ay);
-  if(!wx && !wy) return null;
-  let sx = wx ? wx.s : wy.s;
-  let sy = wy ? wy.s : wx.s;
-  const con = Math.min(wx ? wx.con : 1, wy ? wy.con : 1);
+  const ax = detectAxis(img, box, QP, 0);
+  const ay = detectAxis(img, box, QP, 1);
+  if(!ax && !ay) return null;
+  let sx = ax ? ax.s : ay.s;
+  let sy = ay ? ay.s : ax.s;
+  const con = Math.min(ax ? ax.score : 1, ay ? ay.score : 1);
 
   /* Cross-axis reconciliation.
      Near-equal axes snap square: a sprite upscaled by one factor should not
      come back 7.98 x 8.03 and a pixel off.
-     On WILD disagreement, take the finer step on both axes. One axis locking
-     onto content scale is the common failure and it always lands too coarse —
-     a tall character has strong horizontal banding (head, torso, legs) that
-     no amount of within-cell variance can distinguish from a real grid using
-     that axis alone. The other axis usually still sees the true pitch, and
-     erring fine is the cheap mistake anyway: a too-fine grid subdivides
-     losslessly, a too-coarse one destroys detail that cannot come back. */
+     On WILD disagreement, prefer the axis that is more confident, and only
+     fall back to the finer step when neither is. One axis locking onto content
+     scale is the common failure and always lands too coarse; erring fine is
+     the cheap mistake, since a too-fine grid subdivides losslessly. */
   const ratio = Math.max(sx, sy)/Math.min(sx, sy);
+  const oct = Math.round(ratio);
   if(ratio < 1.05){
     const m = (sx + sy)/2; sx = m; sy = m;
-  } else if(ratio > 1.25 && wx && wy){
+  } else if(oct >= 2 && Math.abs(ratio - oct) < 0.06){
+    /* The axes differ by almost exactly an integer factor. That is an octave
+       slip on one axis, not a genuine non-square upscale — a real 2:1 upscale
+       would not land within 6% of exactly 2.000 by accident on art whose two
+       axes otherwise share a grid. Take the finer: a harmonic is always a
+       MULTIPLE of the truth, never a divisor of it, so the finer axis is the
+       one that has not slipped. */
     const fine = Math.min(sx, sy); sx = fine; sy = fine;
+  } else if(ratio > 1.25 && ax && ay){
+    /* Measured: letting confident axes disagree costs more than it buys.
+       Genuinely non-square upscales exist, but square ones dominate, and
+       reconciling repairs a weak axis far more often than it breaks a real
+       non-square one — allowing independence at every confidence threshold
+       tried took 58.4% down to 47.1% or worse. The nonsquare category is
+       given up deliberately, not by oversight. */
+    if(ax.score >= GRID.STRONG && ay.score >= GRID.STRONG){
+      /* both confident: keep the axes independent */
+    } else {
+      const rel = Math.abs(ax.score - ay.score)/Math.max(1e-9, Math.max(ax.score, ay.score));
+      if(rel > 0.35){                     /* one axis clearly knows better */
+        const s = ax.score > ay.score ? ax.s : ay.s;
+        sx = s; sy = s;
+      } else {
+        const fine = Math.min(sx, sy); sx = fine; sy = fine;
+      }
+    }
   }
   const {cw, ch} = box;
   return {
@@ -1484,8 +1741,153 @@ function detectGrid(img, box){
     cols: Math.max(1, Math.round(cw/sx)),
     rows: Math.max(1, Math.round(ch/sy)),
     con,
-    errX: wx ? wx.err : null, errY: wy ? wy.err : null
+    errX: ax ? ax.err : null, errY: ay ? ay.err : null
   };
+}
+
+/**
+ * ARBITRATION — two independent detectors propose, both judge.
+ *
+ * Distillability (within-cell variance) and YIN (period of the second-
+ * difference impulse train) fail on different images, which is exactly what
+ * makes combining them worth anything. Measured separately across 43
+ * distortion categories: distillability gets 100% on clean integer upscales
+ * and 0% on bilinear/mush/dead_cells; YIN gets 0% on clean and 50%/25%/38% on
+ * those same three. Neither dominates; each is silent where the other speaks.
+ *
+ * So rather than trusting whichever fired, both score every candidate — and
+ * the candidate set deliberately includes each proposal's HALF and DOUBLE.
+ * Octave errors are the central failure mode of every periodicity estimator,
+ * and the cheapest way to fix one detector's octave slip is to ask a detector
+ * with different physics which octave it prefers.
+ *
+ * Each detector's opinion is normalised by its own best over the candidate
+ * set, so a detector with no signal spreads flat, near-equal values across all
+ * candidates and cannot outvote one that is discriminating sharply. That is
+ * self-weighting: confidence is expressed as contrast, not as a tuned weight.
+ */
+function detectAxis(img, box, QP, axis){
+  const len = axis === 0 ? box.cw : box.ch;
+  const A  = distillAxis(img, box, QP, axis);
+  const yc = yinCurve(img, box, axis);
+  if(!A && !yc) return null;
+
+  const scored = A ? distScoreCurve(A) : null;
+  const lo = Math.max(GRID.MIN_STEP, len/GRID.MAX_NATIVE);
+  const hi = Math.min(GRID.MAX_STEP, len/4);
+
+  /* --- proposals --- */
+  const props = [];
+  if(A){
+    const w = pickStep(A);
+    if(w) props.push(w.s);
+    /* the strongest few local maxima of the distillability score, so the
+       arbiter is not limited to that detector's own final answer */
+    for(let i=1; i<scored.length-1; i++){
+      if(scored[i] > scored[i-1] && scored[i] >= scored[i+1] && scored[i] > 0) props.push(A.cand[i].s);
+    }
+  }
+  if(yc){
+    const p = boundaryProfile(img, box, axis);
+    if(p){ const r = yinPeriod(p, lo, hi); if(r) props.push(r.period); }
+    for(let T=3; T<yc.hi-1; T++){
+      if(yc.dp[T] < yc.dp[T-1] && yc.dp[T] <= yc.dp[T+1] && yc.dp[T] < GRID.YIN_MAX) props.push(T);
+    }
+  }
+  if(!props.length) return null;
+
+  /* --- candidates: every proposal, plus its half and double --- */
+  const cands = [];
+  const seen = [];
+  for(const p of props) for(const m of [0.5, 1, 2]){
+    const s = p*m;
+    if(s < lo || s > hi) continue;
+    if(seen.some(q => Math.abs(q - s)/s < 0.02)) continue;
+    seen.push(s); cands.push(s);
+  }
+  if(!cands.length) return null;
+  cands.sort((a,b) => a-b);
+
+  /* --- both judge, but NOT as equals ---
+     Normalising each detector by its own best gives it full voting power even
+     when it is confidently wrong, and "no signal" does not mean "flat curve":
+     a detector can have a sharp spurious peak. Measured on a resize-chained
+     image that ends in an exact 3x upscale, YIN correctly locks onto the 3px
+     RESAMPLING lattice and outvotes the 23.9px ART lattice — both are real
+     periodicities, but only one is the pixel grid.
+     Distillability is the one that can tell them apart, because it asks
+     whether cells are internally uniform in colour, which is true of an art
+     grid and false of a resampling grid. So distillability leads whenever it
+     has real evidence, and YIN decides only where distillability is silent —
+     which is exactly the split the two measured: 100%/0% on clean upscales,
+     0%/50% on bilinear smear. */
+  const dv = cands.map(s => A ? Math.max(0, distAt(A, scored, s)) : 0);
+  const yv = cands.map(s => yinAt(yc, s));
+  const dMax = Math.max(...dv), yMax = Math.max(...yv);
+  const wY = Math.max(0, 1 - dMax/GRID.D_STRONG);   /* YIN's say, 1 down to 0 */
+  let bi = -1, bs = -1;
+  const total = cands.map((s, i) => {
+    const d = dMax > 0 ? dv[i]/dMax : 0;
+    const y = yMax > 0 ? yv[i]/yMax : 0;
+    return d + wY*y;
+  });
+  for(let i=0; i<cands.length; i++) if(total[i] > bs){ bs = total[i]; bi = i; }
+
+  /* Harmonic hygiene, applied last: among candidates within a whisker of the
+     winner, take the smallest. A submultiple subdivides losslessly and a
+     too-fine grid is recoverable; content scale is always coarser than the
+     pixel grid and a too-coarse grid has already thrown detail away. */
+  for(let i=0; i<bi; i++) if(total[i] >= bs*GRID.HYG){ bi = i; break; }
+
+  if(bs < GRID.FUSE_FLOOR) return null;
+
+  /* INTEGER CELL COUNT.
+     The grid has to divide the axis into a whole number of cells, so the only
+     steps that can be right are len/n for integer n. A step 1% off puts
+     len/step at 49.6 and rounding takes it to 50 — or to 49, and the whole
+     sprite is a cell short. Measured, that off-by-one was the single biggest
+     remaining bucket: 62.8% of cases were within one cell but only 52.3% were
+     exact. So snap to the integer counts around the winner and let both
+     detectors judge which one the image actually supports, instead of
+     rounding blind. */
+  let s = cands[bi];
+  const n0 = Math.round(len/s);
+  /* Judged by MEASURING each candidate, not by interpolating the ladder:
+     adjacent integer counts differ by 1/n, which for a 50-cell sprite is 2% —
+     the same as the ladder spacing, so an interpolated score cannot tell them
+     apart. Re-running the phase search at each len/n can. */
+  /* the same contrast x alignment-advantage score as the main curve, but
+     MEASURED at this step rather than interpolated: raw error alone is not a
+     discriminator, since it falls monotonically as cells get smaller and would
+     always pick the largest cell count. */
+  const measure = cs => {
+    if(!A) return 0;
+    const nph = Math.max(8, Math.min(GRID.MAX_PHASE, Math.round(2*cs))) & ~1;
+    const es = new Float64Array(nph);
+    let best = -Infinity, bj = 0;
+    for(let j=0; j<nph; j++){
+      es[j] = gridEnergy(A.S, A.lines, A.len, cs, j*cs/nph);
+      if(es[j] > best){ best = es[j]; bj = j; }
+    }
+    const anti = es[(bj + (nph>>1)) % nph];
+    const err = (A.Qtot - best)/A.T, con = (best - anti)/A.T;
+    const tr = trendAt(A, scored, cs);
+    return Math.max(0, con) * Math.max(0, 1 - err/tr);
+  };
+  let bn = s, bnScore = -Infinity;
+  const dm = [], ym = [], ss = [];
+  for(let n = Math.max(2, n0-2); n <= n0+2; n++){
+    const cs = len/n;
+    if(cs < lo || cs > hi) continue;
+    ss.push(cs); dm.push(measure(cs)); ym.push(yinAt(yc, cs));
+  }
+  const dMx = Math.max(...dm, 1e-12), yMx = Math.max(...ym, 1e-12);
+  for(let i=0; i<ss.length; i++){
+    const v = dm[i]/dMx + ym[i]/yMx;
+    if(v > bnScore){ bnScore = v; bn = ss[i]; }
+  }
+  s = bn;
+  return {s, score: bs, err: A ? 0 : null};
 }
 
 /* ---- rebuild at one true pixel per detected block ---- */

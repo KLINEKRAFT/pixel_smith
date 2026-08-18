@@ -62,7 +62,9 @@ function grabConst(name){
 
 const FNS = ['cloneImg','hardAlpha','collect','medianCut','chRange','spread','widest','avg',
              'mapPalette','labOf','labDist2','hasAlpha','keyOut','keyPockets',
-             'snapGrid','labelComponents','opaqueMask',
+             'snapGrid','labelComponents','opaqueMask','nyquistFraction',
+             'boundaryProfile','yinPeriod','detectYinAxis','yinCurve','yinAt',
+             'distScoreCurve','distAt','trendAt','detectAxis',
              'contentBox','bboxOf','mergeNearColors','cleanIsolated','fillPinholes',
              'modalNeighbour','edgeCleanup',
              'gridPalette','gridQuant','gridLines','gridSums','gridEnergy','distillAxis','pickStep','detectGrid'];
