@@ -2340,6 +2340,99 @@ function withoutSpecks(img, cut){
 
 /** Per-frame content boxes in one pass over the image, rather than one full
  *  scan per frame. Used to line the SOURCE view up with the REPAIRED view. */
+/**
+ * AUTO FRAME COUNT for a horizontal sprite strip.
+ *
+ * The frame count was the last thing the tool still made you type in, and it
+ * is the one number a wrong guess silently ruins: split a 6-frame sheet into
+ * 5 and every frame is a blend of two poses. So this REFUSES rather than
+ * guesses — an unconfident answer leaves the field alone for the user, the
+ * same posture the grid detector takes on already-native art.
+ *
+ * Two independent tests, and a candidate has to pass both.
+ *
+ * GAPS. Sheets are laid out on a lattice, so the columns where one frame ends
+ * and the next begins are empty. Counting empty runs directly does not work —
+ * a character with a raised sword and a trailing cape produces interior gaps
+ * of its own, and a pose that fills its cell edge to edge produces none. So
+ * instead of counting gaps, each candidate frame count is asked whether ITS
+ * boundaries land on empty columns.
+ *
+ * OCCUPANCY PERIODICITY. Frames of one animation have similar silhouettes, so
+ * the per-column opaque-pixel count repeats with the frame width. Correlation
+ * peaks at the true width AND at every multiple of it, so the fundamental is
+ * the SMALLEST period that still correlates — the largest frame count, not the
+ * best-scoring one. That is the same octave rule the grid detector uses, for
+ * the same reason.
+ *
+ * Only exact divisors of the width are considered. Sheets are authored by
+ * placing N equal cells, so a frame width that does not divide the image is
+ * not a frame width.
+ */
+function detectFrames(img){
+  const {width:w, height:h, data:d} = img;
+  if(w < 32) return 0;
+
+  /* opaque pixels per column */
+  const occ = new Float64Array(w);
+  let total = 0;
+  for(let y=0; y<h; y++){
+    const row = y*w*4;
+    for(let x=0; x<w; x++) if(d[row + x*4 + 3] > 127){ occ[x]++; total++; }
+  }
+  /* A fully opaque image has no silhouette to read: every column is full, so
+     both tests are vacuous and would happily "confirm" any candidate. */
+  if(!total) return 0;
+  let empties = 0;
+  for(let x=0; x<w; x++) if(occ[x] === 0) empties++;
+  if(empties === 0) return 0;
+
+  const maxF = Math.min(64, Math.floor(w/8));
+  const cands = [];
+  for(let F=2; F<=maxF; F++) if(w % F === 0) cands.push(F);
+  if(!cands.length) return 0;
+
+  /* mean-removed occupancy, for correlation */
+  let mean = 0; for(let x=0;x<w;x++) mean += occ[x]; mean /= w;
+  const c = new Float64Array(w);
+  let energy = 0;
+  for(let x=0;x<w;x++){ c[x] = occ[x]-mean; energy += c[x]*c[x]; }
+  if(energy <= 0) return 0;
+
+  const GAP_TOL = 0.02;   // boundary column may hold this share of the height
+  const CORR_MIN = 0.55;  // shifted silhouette must still look like itself
+
+  let best = 0;
+  for(const F of cands){
+    const fw = w/F;
+
+    /* every interior boundary must sit on an empty (or near-empty) column */
+    let clear = true;
+    for(let k=1; k<F && clear; k++){
+      const x = k*fw;
+      /* the seam is between x-1 and x; allow a pixel of slack either way */
+      let mn = Infinity;
+      for(let j=Math.max(0,x-1); j<=Math.min(w-1,x); j++) if(occ[j] < mn) mn = occ[j];
+      if(mn > h*GAP_TOL) clear = false;
+    }
+    if(!clear) continue;
+
+    /* and the silhouette must repeat at that width */
+    let dot = 0, n = 0;
+    for(let x=0; x+fw<w; x++){ dot += c[x]*c[x+fw]; n++; }
+    if(!n) continue;
+    const corr = dot/energy*(w/n);
+    if(corr < CORR_MIN) continue;
+
+    /* Largest passing F: correlation is just as high at every multiple of the
+       true frame width, so the biggest count that still passes is the
+       fundamental. Taking the best-scoring candidate instead lands on 2 or 3
+       frames for an 8-frame walk cycle. */
+    if(F > best) best = F;
+  }
+  return best;
+}
+
 function frameBoxes(img, frames, cut){
   const {width:w, height:h, data:d} = img;
   const fw = w/frames;
@@ -2397,6 +2490,17 @@ function prep(a){
   if(a.keyBg){
     keyOut(img, S.keyTol);
     if(S.pockets) a.pockets = keyPockets(img, S.keyTol, S.pocketAspect, 0.95);
+  }
+
+  /* Frame count, decided once from the keyed image. It has to happen here
+     rather than at load because the silhouette only exists after the
+     background is keyed out, and the silhouette is the whole signal.
+     Deliberately once: re-deciding on every settings change would yank the
+     count out from under a user who had corrected it. */
+  if(a.framesAuto){
+    const n = detectFrames(img);
+    if(n > 1){ a.frames = n; a.framesFound = true; }
+    a.framesAuto = false;
   }
 
   /* keyed, pre-snap content boxes — the anchor the SOURCE view lines up on */
@@ -2798,7 +2902,7 @@ function readout(a, out){
   $('#roNative').textContent = a.native ? Math.round(a.native.w/a.frames) + '×' + a.native.h : '—';
   $('#roSrc').textContent    = a.cellW + '×' + a.cellH;
   $('#roOut').textContent    = out.w + '×' + out.h;
-  $('#roFrames').textContent = a.frames;
+  $('#roFrames').textContent = a.frames + (a.framesFound ? ' · auto' : '');
   $('#roColors').textContent = D.colors;
   const bb = bboxOf(out.frames[S.frame].data, out.w, out.h, 0, 0, out.w, out.h, 128);
   $('#roH').textContent = bb ? bb.h + ' px' : '—';
@@ -3099,7 +3203,11 @@ function addFiles(files){
     img.onload = () => {
       const a = {
         id: ++uid, name: file.name, el: img,
-        frames: (img.width % img.height === 0 && img.width/img.height > 1) ? img.width/img.height : 1
+        /* Fallback only. detectFrames replaces this during prep once the
+           background has been keyed out; square frames are merely the most
+           common layout, not a reliable signal — 32x48 frames defeat it. */
+        frames: (img.width % img.height === 0 && img.width/img.height > 1) ? img.width/img.height : 1,
+        framesAuto: true
       };
       analyse(a);
       S.anims.push(a);
@@ -3150,7 +3258,8 @@ function drawSources(){
       const n = clamp(parseInt(e.target.value) || 1, 1, 64);
       if(a.src.width % n !== 0){ e.target.style.borderColor = 'var(--rust)'; }
       else e.target.style.borderColor = '';
-      a.frames = n; a.edits = new Map(); prep(a); S.frame = 0; refreshAll();
+      a.frames = n; a.framesAuto = false; a.framesFound = false;
+      a.edits = new Map(); prep(a); S.frame = 0; refreshAll();
     };
     box.appendChild(d);
   });
