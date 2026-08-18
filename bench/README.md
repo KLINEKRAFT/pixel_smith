@@ -92,6 +92,36 @@ so the comparison between methods is fair. Point `--data` at a folder of real
 1x pixel art when you have one; `pixelbench validate` will warn if anything in
 it is not actually native.
 
+## Auto frame count
+
+`detectFrames` reads the frame count of a horizontal sprite strip, replacing
+the one number the tool still made you type. The old fallback guessed
+`width / height`, which is right only for square frames — a 5-frame sheet of
+24x40 cells is 120x40, so it confidently answered 3 and blended every pose.
+
+It refuses rather than guesses, the same posture the grid detector takes on
+already-native art, because a wrong frame count silently ruins the sheet.
+A candidate has to pass two independent tests:
+
+- **Gaps.** Not "count the empty runs" — a raised sword or a trailing cape
+  makes interior gaps of its own. Instead each candidate count is asked
+  whether ITS boundaries land on empty columns.
+- **Occupancy periodicity.** Frames of one animation share a silhouette, so
+  the per-column opaque count repeats at the frame width. Correlation peaks at
+  every multiple of the true width, so the fundamental is the SMALLEST period
+  that still correlates — the largest count, not the best-scoring one. Same
+  octave rule as the grid detector, for the same reason.
+
+Only exact divisors of the width are considered: sheets are authored as N
+equal cells, so a width that does not divide the image is not a frame width.
+
+`bench/frames.mjs` holds the fixtures, easiest case first — a clean padded
+4-frame strip is check 1, because anything that cannot count that is broken
+regardless of how it handles the awkward ones. Two adversarial checks cover
+the octave trap. One case is genuinely undecidable and recorded as such:
+4 frames each holding two identical sprites is pixel-identical to 8 frames
+holding one, and it answers 8.
+
 ## Where we stand
 
 The **full** 60-image corpus, 2580 scored inputs, every method scored by
