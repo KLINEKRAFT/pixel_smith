@@ -1131,114 +1131,367 @@ function hasAlpha(img){
   return false;
 }
 
-/* ---- detect the block pitch the generator actually drew on ---- */
-function detectPitch(img, box){
-  const {width:w, data:d} = img;
+
+const NOISE_TOL = 10;      /* per-channel deviation still counted as "flat" */
+
+/* ════════════════════════════════════════════════
+   GRID DETECTION — distillability
+   ════════════════════════════════════════════════
+
+   This replaces a comb of edge energy — how much stronger the sampled
+   boundaries are than everything else — which was biased. A larger step takes
+   fewer samples, so it cherry-picks the strongest boundaries while barely
+   moving the "off" average: the score climbed with the step and the maximum
+   saturated at the top of the search range. Measured on a clean 8x nearest
+   upscale of a 64x64 sprite it returned 31.98, exactly 4x the truth, and
+   scored 2.9% exact native size on pixel-bench — below the naive baseline's
+   4.5%. Every guard bolted on top (a /2 /3 /4 submultiple net, a confidence
+   gate, a "would collapse" gate) was a patch on a biased objective, which is
+   why fixing one class of image kept breaking another.
+
+   This asks a different, unbiased question: if the image really were
+   downscaled on this grid, how much would that destroy? Downscale-then-
+   upscale round-trip error equals total WITHIN-CELL VARIANCE, so it can be
+   read straight out of prefix sums of I and I^2 without resizing anything:
+
+       within(s, phase) = sum(I^2) - sum_cells (sum_cell I)^2 / width_cell
+
+   Below the true step, error sits on a floor — subdividing a flat cell
+   destroys nothing. At the true step it is still on the floor. Above it the
+   error jumps, because real detail is being averaged away. So the answer is
+   the LARGEST step whose error is still on the floor, which kills the octave
+   trap structurally rather than by threshold. Cells are FRACTIONAL (the
+   cumsum is interpolated): rounding boundaries to integers biases the
+   minimum away from the true step.
+
+   Approach adapted from Retro Diffusion's Pixel Art Fixer (MIT), which
+   established the round-trip/within-cell-variance identity and the
+   error-gated harmonic promotion rule.
+   https://github.com/Retro-Diffusion/pixel-art-fixer
+*/
+const GRID = {
+  MIN_STEP: 1.55,
+  MAX_STEP: 64,
+  RATIO:    1.02,    // geometric spacing of candidate steps
+  MAX_LINES: 40,     // scanlines sampled per axis
+  MAX_PHASE: 24,     // phase samples per candidate step
+  MAX_NATIVE: 512,   // the largest native dimension the app can output
+  QUANT_K:  14,      // flatten AA/mush ramps before measuring variance
+  ERR_TOL:  0.020,   // how far above the floor still counts as lossless
+  C_FLOOR:  0.012,   // below this there is no grid signal at all
+  CAP_K:    1.0,     // detail-scale cap, relative to the finest-scale error
+  NCH: 3
+};
+
+/** Quantised, zero-mean scanlines for one axis (0 = rows/x, 1 = cols/y).
+ *  Quantising first matters: an anti-aliased ramp inside a cell carries
+ *  residual variance at every step and drowns the curve. */
+/* The palette used to flatten ramps. Sampled from the box, not built by
+   materialising and mapping the whole crop: detection only ever reads about
+   190k of a 2.8M-pixel upload, so quantising on demand per sample (with a
+   cache) is far cheaper than quantising everything twice. */
+function gridPalette(img, box){
   const {x0, y0, cw, ch} = box;
-  const ex = new Float64Array(cw), ey = new Float64Array(ch);
-  for(let y=0; y<ch; y++){
-    for(let x=1; x<cw; x++){
-      const i = ((y0+y)*w + x0+x)*4, j = i-4;
-      const e = Math.abs(d[i]-d[j]) + Math.abs(d[i+1]-d[j+1]) + Math.abs(d[i+2]-d[j+2]) + Math.abs(d[i+3]-d[j+3]);
-      ex[x] += e; ey[y] += e;
-    }
+  const sd = img.data, sw = img.width;
+  const px = [];
+  const step = Math.max(1, Math.floor(Math.sqrt(cw*ch/20000)));
+  for(let y=0; y<ch; y+=step) for(let x=0; x<cw; x+=step){
+    const s = ((y0+y)*sw + x0+x)*4;
+    if(sd[s+3] <= 127) continue;
+    px.push([sd[s], sd[s+1], sd[s+2]]);
   }
-  for(let y=1; y<ch; y++){
-    for(let x=0; x<cw; x++){
-      const i = ((y0+y)*w + x0+x)*4, j = i - w*4;
-      const e = Math.abs(d[i]-d[j]) + Math.abs(d[i+1]-d[j+1]) + Math.abs(d[i+2]-d[j+2]) + Math.abs(d[i+3]-d[j+3]);
-      ey[y] += e; ex[x] += e;
-    }
+  return {pal: medianCut(px, GRID.QUANT_K), cache: new Map()};
+}
+function gridQuant(QP, r, g, b){
+  const key = (r<<16) | (g<<8) | b;
+  let v = QP.cache.get(key);
+  if(v !== undefined) return v;
+  const pal = QP.pal;
+  let best = 0, bd = Infinity;
+  for(let k=0; k<pal.length; k++){
+    const dr = r-pal[k][0], dg = g-pal[k][1], db = b-pal[k][2];
+    const d = dr*dr*0.3 + dg*dg*0.59 + db*db*0.11;
+    if(d < bd){ bd = d; best = k; }
   }
-  /* Score = how much stronger the sampled boundaries are than everything
-     else. A plain "energy at boundaries" score happily locks onto 2x the
-     real pitch, because half the true boundaries just get ignored. Scoring
-     the contrast punishes that: the skipped boundaries land in the "off"
-     bucket and drag the score down. */
-  const rate = (arr, pitch) => {
-    let total = 0;
-    for(let i=0; i<arr.length; i++) total += arr[i];
-    if(total <= 0 || arr.length < 8) return 0;
-    const mean = total/arr.length;
-    let best = 0;
-    for(let ph=0; ph<pitch; ph += pitch/16){
-      let s = 0, n = 0;
-      for(let t=ph; t<arr.length-1; t+=pitch){ s += arr[Math.round(t)]; n++; }
-      if(n < 4) continue;
-      const on = s/n;
-      const off = (total - s)/Math.max(1, arr.length - n);
-      const sc = (on - off)/mean;
-      if(sc > best) best = sc;
-    }
-    return best;
-  };
-  const at = p => rate(ex, p) + rate(ey, p);
-  let bp = 0, bs = -1;
-  for(let p=4; p<=32; p+=0.02){
-    const s = at(p);
-    if(s > bs){ bs = s; bp = p; }
-  }
-  /* Safety net: if a submultiple is nearly as good, it is the fundamental. */
-  for(const div of [2, 3, 4]){
-    const c = bp/div;
-    if(c >= 3.5 && at(c) >= bs*0.88){ bp = c; break; }
-  }
-  return bp;
+  v = pal.length ? pal[best] : [r,g,b];
+  if(QP.cache.size < 65536) QP.cache.set(key, v);
+  return v;
 }
 
-/* ---- is the detected pitch a REAL grid, or just feature spacing? ----
-   detectPitch always returns its best guess, and on art that is already at
-   native resolution that guess is the rhythm of the drawing itself. Snapping
-   on it destroys the asset. Genuine upscaled pixel art is near-constant inside
-   each block, so measure that: sample blocks and report how much of each one
-   agrees with its own middle colour. Real grids score high, drawings do not.
-
-   Agreement is a distance, not a bucket index. Bucketing looks cheaper but a
-   generator's ±3 sensor-style noise straddles bucket boundaries, so a
-   perfectly flat block scores as if it held a dozen colours and genuine
-   upscaled art gets rejected as "blocks not uniform". Comparing against the
-   block's per-channel median with a tolerance is noise-proof and still scores
-   an already-native drawing low, which is the gate's whole purpose. */
-const NOISE_TOL = 10;      /* per-channel deviation still counted as "flat" */
-function gridConfidence(img, pitch, box){
+function gridLines(img, box, QP, axis){
   const {x0, y0, cw, ch} = box;
-  const cols = Math.max(1, Math.round(cw/pitch)), rows = Math.max(1, Math.round(ch/pitch));
   const sd = img.data, sw = img.width;
-  let sum = 0, n = 0;
-  const rStep = Math.max(1, Math.floor(rows/24)), cStep = Math.max(1, Math.floor(cols/12));
-  const R = [], G = [], B = [];
-  for(let r=0; r<rows; r+=rStep) for(let c=0; c<cols; c+=cStep){
-    const fy0 = y0 + r*ch/rows, fy1 = y0 + (r+1)*ch/rows;
-    const fx0 = x0 + c*cw/cols, fx1 = x0 + (c+1)*cw/cols;
-    const iy0 = Math.round(fy0 + (fy1-fy0)*0.15), iy1 = Math.max(iy0+1, Math.round(fy1 - (fy1-fy0)*0.15));
-    const ix0 = Math.round(fx0 + (fx1-fx0)*0.15), ix1 = Math.max(ix0+1, Math.round(fx1 - (fx1-fx0)*0.15));
-    /* cap the samples per block so a 40px pitch costs the same as a 6px one */
-    const step = Math.max(1, Math.floor(Math.sqrt((iy1-iy0)*(ix1-ix0)/256)));
-    R.length = 0; G.length = 0; B.length = 0;
-    for(let y=iy0; y<iy1; y+=step) for(let x=ix0; x<ix1; x+=step){
-      const i = (y*sw + x)*4;
-      if(sd[i+3] < 128) continue;
-      R.push(sd[i]); G.push(sd[i+1]); B.push(sd[i+2]);
+
+  const len   = axis === 0 ? cw : ch;
+  const nAll  = axis === 0 ? ch : cw;
+  const stride = Math.max(1, Math.ceil(nAll/GRID.MAX_LINES));
+  const lines = Math.ceil(nAll/stride);
+  const N = GRID.NCH;
+  const buf = new Float64Array(lines*len*N);
+  for(let l=0; l<lines; l++){
+    const t = Math.min(nAll-1, l*stride);
+    for(let i=0; i<len; i++){
+      const x = axis === 0 ? i : t, y = axis === 0 ? t : i;
+      const s = ((y0+y)*sw + x0+x)*4, o = (l*len + i)*N;
+      const q = gridQuant(QP, sd[s], sd[s+1], sd[s+2]);
+      const r = q[0], g = q[1], b = q[2];
+      buf[o]   = (0.299*r + 0.587*g + 0.114*b)/255;  /* luma */
+      buf[o+1] = (r - b)/255;                        /* a colour axis */
+      buf[o+2] = sd[s+3]/255;                        /* alpha: the silhouette
+                                                        edge is a strong cue */
     }
-    const tot = R.length;
-    if(tot < 4) continue;
-    const mid = arr => { const s = arr.slice().sort((p,q) => p-q); return s[s.length >> 1]; };
-    const mr = mid(R), mg = mid(G), mb = mid(B);
-    let flat = 0;
-    for(let i=0; i<tot; i++){
-      if(Math.abs(R[i]-mr) <= NOISE_TOL && Math.abs(G[i]-mg) <= NOISE_TOL &&
-         Math.abs(B[i]-mb) <= NOISE_TOL) flat++;
-    }
-    sum += flat/tot; n++;
   }
-  return n ? sum/n : 0;
+  /* Zero-mean and equalise each channel. Without the variance normalisation a
+     single loud channel decides everything; equal weight is what lets the
+     quiet one that happens to carry this image's grid be heard. */
+  for(let c=0; c<N; c++){
+    let m = 0;
+    for(let k=0; k<lines*len; k++) m += buf[k*N + c];
+    m /= (lines*len);
+    let v = 0;
+    for(let k=0; k<lines*len; k++){ const d = buf[k*N + c] - m; v += d*d; }
+    v = Math.sqrt(v/(lines*len));
+    const g = v > 1e-6 ? 1/v : 0;               /* a flat channel says nothing */
+    for(let k=0; k<lines*len; k++) buf[k*N + c] = (buf[k*N + c] - m)*g;
+  }
+  return {buf, lines, len};
+}
+
+/** Prefix sums of I and I^2 along each scanline. */
+function gridSums(L){
+  const {buf, lines, len} = L, N = GRID.NCH;
+  const S = new Float64Array(lines*(len+1)*N);
+  const Q = new Float64Array(lines*(len+1)*N);
+  for(let l=0; l<lines; l++){
+    const base = l*(len+1)*N;
+    for(let c=0; c<N; c++){
+      let s = 0, q = 0;
+      for(let i=0; i<len; i++){
+        const v = buf[(l*len + i)*N + c];
+        s += v; q += v*v;
+        S[base + (i+1)*N + c] = s;
+        Q[base + (i+1)*N + c] = q;
+      }
+    }
+  }
+  return {S, Q};
+}
+
+/** Sum over cells of (sum_cell I)^2 / width — the part of the total energy a
+ *  box-downscale on this grid would KEEP. Maximising it minimises within-cell
+ *  variance. Boundaries are fractional; the cumsum is linearly interpolated. */
+/* scratch, reused across candidate steps so the hot loop allocates nothing */
+const GB = {b:new Float64Array(0), i:new Int32Array(0), v:new Float64Array(0)};
+function gridEnergy(S, lines, len, s, p){
+  const N = GRID.NCH;
+  /* Boundary positions, and the floor/fraction of each, depend only on
+     (s, phase) — not on which scanline we are on. Computing them once instead
+     of once per line, and reading each boundary's interpolated cumsum once
+     instead of twice (adjacent cells share it), is most of the cost. */
+  const kStart = Math.floor(-p/s), kEnd = Math.ceil((len - p)/s);
+  const need = kEnd - kStart + 2;
+  if(GB.b.length < need){
+    GB.b = new Float64Array(need); GB.i = new Int32Array(need); GB.v = new Float64Array(need*N);
+  }
+  const _gb = GB.b, _gi = GB.i, _gv = GB.v;
+  let m = 0;
+  for(let k=kStart; k<=kEnd; k++){
+    let b = p + s*k;
+    if(b < 0) b = 0; else if(b > len) b = len;
+    if(m && b - _gb[m-1] <= 1e-9) continue;      /* clipped duplicates */
+    _gb[m] = b;
+    _gi[m] = Math.min(len - 1, Math.max(0, Math.floor(b)));
+    m++;
+  }
+  if(m < 2) return 0;
+
+  let e = 0;
+  for(let l=0; l<lines; l++){
+    const base = l*(len+1)*N;
+    /* interpolated cumsum at every boundary, once */
+    for(let t=0; t<m; t++){
+      const i0 = _gi[t], f = _gb[t] - i0;
+      const a = base + i0*N, b2 = a + N;
+      const o = t*N;
+      for(let c=0; c<N; c++){
+        const s0 = S[a+c];
+        _gv[o+c] = s0 + (S[b2+c] - s0)*f;
+      }
+    }
+    for(let t=1; t<m; t++){
+      const w = _gb[t] - _gb[t-1];
+      if(w <= 1e-3) continue;
+      const o = t*N, q = o - N;
+      for(let c=0; c<N; c++){
+        const d = _gv[o+c] - _gv[q+c];
+        e += d*d/w;
+      }
+    }
+  }
+  return e;
+}
+
+/** Error and phase-contrast curves over a geometric ladder of steps.
+ *  Phase count scales with the step, which keeps the cost per candidate
+ *  constant (cells x phases ~ len/s x 2s = 2 len). */
+function distillAxis(img, box, QP, axis){
+  const L = gridLines(img, box, QP, axis);
+  const {lines, len} = L;
+  if(len < 12 || !lines) return null;
+  const {S, Q} = gridSums(L);
+  const N = GRID.NCH;
+
+  let Qtot = 0, T = 0;
+  for(let l=0; l<lines; l++){
+    const e = l*(len+1)*N + len*N;
+    for(let c=0; c<N; c++){
+      const q = Q[e+c], s = S[e+c];
+      Qtot += q; T += q - s*s/len;
+    }
+  }
+  if(T <= 1e-9) return null;                 /* a flat band carries no grid */
+
+  /* A step below len/MAX_NATIVE would claim a sprite taller than the app can
+     even export, and scanning down there is where all the time goes: cost per
+     candidate is (lines x len x channels), so the tiny steps with thousands of
+     cells dominate. Bounding the ladder by the real output range took prep on
+     a 1530x3059 upload from 9.6s to under a second. */
+  const out = [];
+  const lo = Math.max(GRID.MIN_STEP, len/GRID.MAX_NATIVE);
+  const hi = Math.min(GRID.MAX_STEP, len/4);
+  if(hi <= lo) return null;
+  for(let s = lo; s <= hi; s *= GRID.RATIO){
+    const n = Math.max(8, Math.min(GRID.MAX_PHASE, Math.round(2*s))) & ~1;
+    let best = -Infinity, bi = 0;
+    const es = new Float64Array(n);
+    for(let j=0; j<n; j++){
+      es[j] = gridEnergy(S, lines, len, s, j*s/n);
+      if(es[j] > best){ best = es[j]; bi = j; }
+    }
+    const anti = es[(bi + (n>>1)) % n];      /* the maximally wrong phase */
+    out.push({s, err:(Qtot - best)/T, con:(best - anti)/T, phase: bi*s/n});
+  }
+  return {cand: out, S, Q, lines, len, Qtot, T};
+}
+
+/**
+ * Distillability score, judged against the LOCAL baseline rather than a
+ * global floor:
+ *
+ *     score(s) = contrast(s) * max(1 - err(s)/trend(s), 0)
+ *
+ * where trend(s) is a running median of the error over a log-window around s
+ * — the error a merely-misaligned grid of about this scale would get.
+ *
+ *   · contrast (how much worse the maximally wrong phase is) is ~0 below the
+ *     true step, because down there every phase subdivides cells and none is
+ *     wrong. It peaks where the grid actually locks on.
+ *   · the trend factor kills exact MULTIPLES of the true step: they sit at
+ *     the local baseline, so err/trend ~ 1 and the factor collapses.
+ *
+ * Judging relative to the neighbourhood is what makes this robust. An
+ * absolute floor fails because the error at the true step is not flat: a
+ * candidate step 1% away de-phases the grid across the image and inflates its
+ * error, so the true step can miss a fixed threshold while its own half
+ * — which happened to land nearer a ladder rung — sneaks under it.
+ */
+function pickStep(A){
+  if(!A || !A.cand.length) return null;
+  const cand = A.cand, n = cand.length;
+  const ls = cand.map(c => Math.log(c.s));
+  const scored = [];
+  const win = [];
+  for(let i=0; i<n; i++){
+    win.length = 0;
+    for(let j=0; j<n; j++) if(Math.abs(ls[j] - ls[i]) <= 0.14) win.push(cand[j].err);
+    win.sort((p,q) => p-q);
+    const trend = Math.max(1e-6, win[win.length >> 1]);
+    const sc = Math.max(cand[i].con, 0) * Math.max(1 - cand[i].err/trend, 0);
+    scored.push(sc);
+  }
+  /* Cap at the DETAIL SCALE before choosing. Without this the score picks
+     content scale: on a character the strongest vertical rhythm is the
+     head/torso/legs banding, and a 48px grid locks onto it three times harder
+     than the true 8px grid. But that grid destroys 5% of the image variance,
+     and the native grid by definition destroys almost none — a 48px cell
+     cannot coexist with 8px detail. The cap is relative to the error a
+     merely-misaligned grid gets at the finest scales, so it adapts to how
+     damaged the image is: on a bilinear smear every grid loses more, and the
+     bar moves with it. */
+  let floor = Infinity;
+  for(const c of cand) if(c.err < floor) floor = c.err;
+  const cap = floor + Math.max(GRID.ERR_TOL, floor*GRID.CAP_K);
+
+  let bi = -1, bs = 0;
+  for(let i=0; i<n; i++){
+    if(cand[i].err > cap) continue;
+    if(scored[i] > bs){ bs = scored[i]; bi = i; }
+  }
+  if(bi < 0 || bs < GRID.C_FLOOR) return null;
+  const w = cand[bi];
+
+  /* Refine: a 1% step error de-phases the grid across a wide image, so the
+     ladder rung is rarely the exact answer. */
+  let best = w;
+  for(let s = w.s*0.96; s <= w.s*1.045; s *= 1.003){
+    const ph = Math.max(12, Math.min(48, Math.round(4*s))) & ~1;
+    let e = -Infinity;
+    for(let j=0; j<ph; j++){
+      const v = gridEnergy(A.S, A.lines, A.len, s, j*s/ph);
+      if(v > e) e = v;
+    }
+    const err = (A.Qtot - e)/A.T;
+    if(err < best.err) best = {s, err, con:w.con};
+  }
+  best.score = bs;
+  return best;
+}
+
+/**
+ * Per-axis grid detection. Returns steps, the native cell counts they imply,
+ * and a confidence. Per-axis matters: non-square upscales are common, and a
+ * single global pitch cannot express them at all.
+ */
+function detectGrid(img, box){
+  const QP = gridPalette(img, box);
+  const ax = distillAxis(img, box, QP, 0);
+  const ay = distillAxis(img, box, QP, 1);
+  const wx = pickStep(ax), wy = pickStep(ay);
+  if(!wx && !wy) return null;
+  let sx = wx ? wx.s : wy.s;
+  let sy = wy ? wy.s : wx.s;
+  const con = Math.min(wx ? wx.con : 1, wy ? wy.con : 1);
+
+  /* Cross-axis reconciliation.
+     Near-equal axes snap square: a sprite upscaled by one factor should not
+     come back 7.98 x 8.03 and a pixel off.
+     On WILD disagreement, take the finer step on both axes. One axis locking
+     onto content scale is the common failure and it always lands too coarse —
+     a tall character has strong horizontal banding (head, torso, legs) that
+     no amount of within-cell variance can distinguish from a real grid using
+     that axis alone. The other axis usually still sees the true pitch, and
+     erring fine is the cheap mistake anyway: a too-fine grid subdivides
+     losslessly, a too-coarse one destroys detail that cannot come back. */
+  const ratio = Math.max(sx, sy)/Math.min(sx, sy);
+  if(ratio < 1.05){
+    const m = (sx + sy)/2; sx = m; sy = m;
+  } else if(ratio > 1.25 && wx && wy){
+    const fine = Math.min(sx, sy); sx = fine; sy = fine;
+  }
+  const {cw, ch} = box;
+  return {
+    stepX: sx, stepY: sy,
+    cols: Math.max(1, Math.round(cw/sx)),
+    rows: Math.max(1, Math.round(ch/sy)),
+    con,
+    errX: wx ? wx.err : null, errY: wy ? wy.err : null
+  };
 }
 
 /* ---- rebuild at one true pixel per detected block ---- */
-function snapGrid(img, pitch, box, lockCols){
+function snapGrid(img, box, cols, rows, lockCols){
   const {x0, y0, cw, ch} = box;
-  let cols = Math.max(1, Math.round(cw/pitch));
-  let rows = Math.max(1, Math.round(ch/pitch));
+  cols = Math.max(1, cols); rows = Math.max(1, rows);
   if(lockCols > 1) cols = Math.max(lockCols, Math.round(cols/lockCols)*lockCols);
   const out = new ImageData(cols, rows);
   const sd = img.data, sw = img.width;
@@ -1851,7 +2104,7 @@ function prep(a){
   /* keyed, pre-snap content boxes — the anchor the SOURCE view lines up on */
   a.rawBoxes = frameBoxes(img, a.frames, 1);
 
-  a.pitch = 0; a.native = null;
+  a.pitch = 0; a.stepX = 0; a.stepY = 0; a.native = null;
   let work = img;
   if(a.snap){
     const bb = contentBox(img, 1)
@@ -1859,17 +2112,25 @@ function prep(a){
             || {x:0, y:0, w:img.width, h:img.height};
     const box = {x0:bb.x, y0:bb.y, cw:bb.w, ch:bb.h};
     const forced = S.pitch > 0;
-    const pitch = forced ? S.pitch : detectPitch(img, box);
-    const outLong = Math.max(bb.w, bb.h)/pitch;
-    a.conf = (pitch >= 2) ? gridConfidence(img, pitch, box) : 0;
+    const g = forced
+      ? {stepX:S.pitch, stepY:S.pitch,
+         cols:Math.max(1, Math.round(bb.w/S.pitch)),
+         rows:Math.max(1, Math.round(bb.h/S.pitch)), con:1}
+      : detectGrid(img, box);
+
     a.rejected = '';
-    /* A manual pitch is the user overruling the gates, so honour it. */
-    if(!forced){
-      if(pitch < 3) a.rejected = 'pitch too small';
-      else if(outLong < 20) a.rejected = 'would collapse to ' + Math.round(outLong) + 'px';
-      else if(a.conf < 0.55) a.rejected = 'blocks not uniform (' + a.conf.toFixed(2) + ')';
-    }
-    if(!a.rejected && pitch >= 2 && (bb.w/pitch) >= 4){
+    a.conf = g ? g.con : 0;
+    /* One honest gate, on the one thing that means "there is no grid here":
+       the detector could not find a step that survives on the error floor
+       with a real phase contrast. Already-native art lands here, which is
+       exactly right — it has nothing to snap to. The old gates ("would
+       collapse to Npx", "blocks not uniform") were compensating for a biased
+       detector, and mostly hid its mistakes as refusals. */
+    if(!g) a.rejected = 'no repeating grid found';
+    else if(!forced && g.stepX < 1.7 && g.stepY < 1.7) a.rejected = 'already at native resolution';
+    else if(g.cols < 3 || g.rows < 3) a.rejected = 'would collapse to ' + g.cols + '×' + g.rows;
+
+    if(!a.rejected){
       /* Quantise BEFORE the snap, not after. At source resolution a small
          accent (a green stripe on a shoe) still owns thousands of pixels and
          survives the cut; at snapped resolution it owns four and gets eaten. */
@@ -1877,8 +2138,9 @@ function prep(a){
         const pal = medianCut(collect([img], 24000), S.snapColors);
         if(pal.length) mapPalette(img, pal);
       }
-      const snapped = snapGrid(img, pitch, box, a.frames);
-      a.pitch = pitch;
+      const snapped = snapGrid(img, box, g.cols, g.rows, a.frames);
+      a.stepX = g.stepX; a.stepY = g.stepY;
+      a.pitch = (g.stepX + g.stepY)/2;
       a.native = {w:snapped.width, h:snapped.height};
       work = snapped;
     }
@@ -2230,7 +2492,11 @@ function readout(a, out){
   setRO('#roGaps', D.gaps || 'none', D.gaps ? 'warn' : 'good');
   setRO('#roDupe', D.dupe || 'none', D.dupe > 4 ? 'warn' : 'good');
 
-  $('#roPitch').textContent  = a.pitch ? a.pitch.toFixed(2) + ' px' : 'not snapped';
+  $('#roPitch').textContent = a.pitch
+    ? (Math.abs(a.stepX - a.stepY) > 0.02
+        ? a.stepX.toFixed(2) + ' × ' + a.stepY.toFixed(2) + ' px'
+        : a.pitch.toFixed(2) + ' px')
+    : 'not snapped';
   $('#roNative').textContent = a.native ? Math.round(a.native.w/a.frames) + '×' + a.native.h : '—';
   $('#roSrc').textContent    = a.cellW + '×' + a.cellH;
   $('#roOut').textContent    = out.w + '×' + out.h;
@@ -2491,7 +2757,7 @@ function expJson(){
       manualEdits: outs[r].diags[0].edits,
       source: {
         cell: a.cellW + 'x' + a.cellH,
-        blockPitch: a.pitch ? +a.pitch.toFixed(2) : null,
+        blockPitch: a.pitch ? {x:+a.stepX.toFixed(3), y:+a.stepY.toFixed(3)} : null,
         aligned: S.align && !a.free,
         footDrift: (S.align && !a.free) ? 0 : a.drift
       }
@@ -2602,7 +2868,9 @@ function drawGridRead(){
   if(a.pitch){
     const frac = Math.abs(a.pitch - Math.round(a.pitch)) > 0.08;
     bits.push('Confidence <b>' + (a.conf || 0).toFixed(2) + '</b>');
-    bits.push('Block pitch <b>' + a.pitch.toFixed(2) + ' px</b>' +
+    bits.push('Block pitch <b>' + (Math.abs(a.stepX - a.stepY) > 0.02
+        ? a.stepX.toFixed(2) + ' × ' + a.stepY.toFixed(2)
+        : a.pitch.toFixed(2)) + ' px</b>' +
       (frac ? ' <span class="bad">(fractional)</span>' : ''));
     const nw = Math.round(a.native.w/a.frames);
     bits.push('Native art size <b>' + nw + ' × ' + a.native.h + '</b> per frame');
