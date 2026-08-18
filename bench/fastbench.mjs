@@ -10,9 +10,7 @@ import path from 'node:path';
 const CASES = process.argv[2] || 'cases';
 const FILTER = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : null;
 const VERBOSE = process.argv.includes('--verbose');
-import { fileURLToPath } from 'node:url';
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const HTML = process.env.PS_HTML || path.join(HERE, '..', 'index.html');
+const HTML = process.env.PS_HTML || new URL('../index.html', import.meta.url).pathname;
 
 /* ---- pull the real functions out of the shipped file ---- */
 const src = fs.readFileSync(HTML, 'utf8');
@@ -56,16 +54,19 @@ class ImageDataShim {
   constructor(a,b,c){ if(a instanceof Uint8ClampedArray){ this.data=a; this.width=b; this.height=c; }
                       else { this.width=a; this.height=b; this.data=new Uint8ClampedArray(a*b*4); } }
 }
-const FNS = ['collect','medianCut','chRange','spread','widest','avg','mapPalette',
+const FNS = ['boundaryMaps','raylAt','raylP','phaseScan','shortRuns','collect','medianCut','chRange','spread','widest','avg','mapPalette',
              'labelComponents','opaqueMask','contentBox','bboxOf',
-             'gridPalette','gridQuant','gridLines','gridSums','gridEnergy',
-             'distillAxis','pickStep','distScoreCurve','distAt','trendAt','detectAxis','detectGrid','yinCurve','yinAt','lossAt','tileStep',
+             'gridPalette','gridQuant','gridLines','gridSums','gridEnergy','phaseScan',
+             'distillAxis','pickStep','distScoreCurve','distAt','trendAt','detectAxis','detectGrid','yinCurve','yinAt','lossAt','tileStep','runBoundaries','runHist','runComb','detectRunAxis',
              'boundaryProfile','yinPeriod','detectYinAxis'];
 const CONSTS = ['RING','ORTH','clamp','GRID','GB'];
+// tolerate builds that define a different set (comparing variants)
+const HAVE_F = FNS.filter(n => { try { grabFn(n); return true; } catch { return false; } });
+const HAVE_C = CONSTS.filter(n => { try { grabConst(n); return true; } catch { return false; } });
 const api = new Function('ImageDataShim',
   'const ImageData = ImageDataShim;\n' +
-  CONSTS.map(grabConst).join('\n') + '\n' + FNS.map(grabFn).join('\n') +
-  '\n; return {' + FNS.concat(CONSTS).join(',') + '};')(ImageDataShim);
+  HAVE_C.map(grabConst).join('\n') + '\n' + HAVE_F.map(grabFn).join('\n') +
+  '\n; return {' + HAVE_F.concat(HAVE_C).join(',') + '};')(ImageDataShim);
 
 /* ---- run ---- */
 const index = JSON.parse(fs.readFileSync(path.join(CASES, 'index.json'), 'utf8'));

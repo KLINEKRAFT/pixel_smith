@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import struct
 import subprocess
+import sys
 
 import numpy as np
 
@@ -31,8 +32,12 @@ class _Bridge:
         env = dict(os.environ)
         env["PS_GATES"] = "1" if gates else "0"
         self.p = subprocess.Popen(
+            # stderr is deliberately NOT swallowed. It carries the bridge's
+            # startup self-test and any extraction failure, and discarding it
+            # once turned "the function list is stale, every image threw" into
+            # a run that looked like it was working for ten minutes.
             ["node", BRIDGE], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, env=env, bufsize=0,
+            stderr=None, env=env, bufsize=0,
         )
 
     def _read(self, n: int) -> bytes:
@@ -40,7 +45,17 @@ class _Bridge:
         while len(out) < n:
             chunk = self.p.stdout.read(n - len(out))
             if not chunk:
-                raise RuntimeError("pixelsmith bridge died")
+                # The runner drops errored rows from the aggregate, so a dead
+                # bridge would otherwise average away to a plausible-looking
+                # score over whatever handful of images happened to survive.
+                # There is no partial result worth having here — take the whole
+                # process down so the failure cannot be mistaken for data.
+                sys.stderr.write(
+                    "\nFATAL: the pixelsmith bridge died. Its stderr is above; "
+                    "a stale extraction list in psbridge.mjs is the usual "
+                    "cause. Refusing to report partial results.\n")
+                sys.stderr.flush()
+                os._exit(70)
             out += chunk
         return bytes(out)
 

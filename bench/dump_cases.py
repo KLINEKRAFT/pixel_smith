@@ -12,7 +12,7 @@ and   outdir/index.json  with ground-truth cols/rows per case.
 import json, os, sys
 import numpy as np
 
-sys.path.insert(0, os.environ.get("PIXELBENCH", "pixel-bench"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "rd", "pixel-bench"))
 
 from pixelbench.data import list_images, load_art
 from pixelbench.distort import make_spec, distort, category_names, damage_native

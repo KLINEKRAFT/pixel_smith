@@ -1175,19 +1175,15 @@ const GRID = {
   RATIO:    1.02,    // geometric spacing of candidate steps
   MAX_LINES: 40,     // scanlines sampled per axis
   MAX_PHASE: 24,     // phase samples per candidate step
+  ROWBLOCKS: 3,      // bands of scanlines that may each pick their own phase
   MAX_NATIVE: 512,   // the largest native dimension the app can output
-  YIN_THRESH: 0.35,  // d' under this counts as "found the period"
-  YIN_MAX:   0.85,   // no dip better than this means no periodic structure
-  FUSE_FLOOR: 0.30,  // combined evidence below this is not a grid
-  STRONG:    99,     // effectively off; see the note in detectGrid
-  NATIVE_LOSS: 0.30, // a grid destroying more than this is not a grid
-  HYG:       0.20,   // candidates within this band of the best are shortlisted
-  MDL:       2.0,    // price of a cell, in residual-log units
-  D_STRONG:  999,    // off: measured, suppressing YIN costs more than it saves
+  PVAL:      1.0,   // Bonferroni false-alarm rate for "there is a grid"
+  NONSQ:     0.25,   // margin a non-square fit must clear to be believed
+  NATIVE_R:  2.0,    // both axes' coherence peaks must clear their own floor by this
+  BANDS:     6,      // scanline bands for the coherence maps
+  LOSS_POW:  6,      // how hard the variance gate bites
+  OCT:       0.55,   // walk to the half count while coherence holds this well
   QUANT_K:  14,      // flatten AA/mush ramps before measuring variance
-  ERR_TOL:  0.020,   // how far above the floor still counts as lossless
-  C_FLOOR:  0.012,   // below this there is no grid signal at all
-  CAP_K:    1.0,     // detail-scale cap, relative to the finest-scale error
   NCH: 3
 };
 
@@ -1290,7 +1286,7 @@ function gridSums(L){
  *  variance. Boundaries are fractional; the cumsum is linearly interpolated. */
 /* scratch, reused across candidate steps so the hot loop allocates nothing */
 const GB = {b:new Float64Array(0), i:new Int32Array(0), v:new Float64Array(0)};
-function gridEnergy(S, lines, len, s, p){
+function gridEnergy(S, lines, len, s, p, nbr, out){
   const N = GRID.NCH;
   /* Boundary positions, and the floor/fraction of each, depend only on
      (s, phase) — not on which scanline we are on. Computing them once instead
@@ -1314,7 +1310,11 @@ function gridEnergy(S, lines, len, s, p){
   if(m < 2) return 0;
 
   let e = 0;
+  const per = nbr > 1 ? out : null;
+  if(per) per.fill(0);
   for(let l=0; l<lines; l++){
+    const blk = per ? Math.min(nbr-1, Math.floor(l*nbr/lines)) : 0;
+    let acc = 0;
     const base = l*(len+1)*N;
     /* interpolated cumsum at every boundary, once */
     for(let t=0; t<m; t++){
@@ -1332,168 +1332,76 @@ function gridEnergy(S, lines, len, s, p){
       const o = t*N, q = o - N;
       for(let c=0; c<N; c++){
         const d = _gv[o+c] - _gv[q+c];
-        e += d*d/w;
+        acc += d*d/w;
       }
     }
+    e += acc;
+    if(per) per[blk] += acc;
   }
   return e;
 }
 
+/**
+ * PER-ROW-BLOCK PHASE FREEDOM.
+ *
+ * A single global phase has to fit the whole axis, so a grid whose phase
+ * varies across the image — a sprite-sheet stitched from blocks with different
+ * offsets, a smooth warp, a slow drift — has NO good global phase, and the fit
+ * does not merely degrade, it collapses. Measured, a warped 24x24 sprite came
+ * back as 7x7 because no global (step, phase) fitted and the coarse steps
+ * looked no worse than the true one.
+ *
+ * Letting each BAND of scanlines pick its own phase costs nothing in
+ * correctness: bands are perpendicular to the axis being measured, so this
+ * adds no freedom along the axis and cannot absorb a wrong step. (Freedom
+ * ALONG the axis would, which is why it is not offered here.) A grid that is
+ * genuinely uniform simply has every band choose the same phase.
+ */
+function phaseScan(S, lines, len, s, nbr, nph){
+  const ens = new Float64Array(nph*nbr);
+  const tmp = new Float64Array(nbr);
+  for(let j=0; j<nph; j++){
+    const tot = gridEnergy(S, lines, len, s, j*s/nph, nbr, tmp);
+    if(nbr > 1) ens.set(tmp, j*nbr);
+    else ens[j] = tot;
+  }
+  let best = 0, anti = 0;
+  for(let b=0; b<nbr; b++){
+    let bj = 0, bv = -Infinity;
+    for(let j=0; j<nph; j++){
+      const v = ens[j*nbr + b];
+      if(v > bv){ bv = v; bj = j; }
+    }
+    best += bv;
+    anti += ens[((bj + (nph>>1)) % nph)*nbr + b];
+  }
+  return {best, anti};
+}
+
 /* ────────────────────────────────────────────────
-   DETECTOR 2 — boundary profile + YIN
+   Why the coherence maps read a SECOND difference
    ────────────────────────────────────────────────
 
-   Distillability reads within-cell variance, which dies on smooth resampling:
-   a bilinear-smeared cell is locally LINEAR, and a linear ramp has the same
-   variance wherever you cut it, so phase stops mattering. Measured contrast at
-   the true step on a bilinear 8x was 0.0098 — indistinguishable from noise.
-   That is why bilinear, bicubic, blur, mush and noise all sat at 0%.
+   Within-cell variance dies on smooth resampling: a bilinear-smeared cell is
+   locally LINEAR, and a linear ramp has the same variance wherever you cut it,
+   so phase stops mattering. Measured contrast at the true step on a bilinear
+   8x was 0.0098 — indistinguishable from noise. That is why bilinear, bicubic,
+   blur, mush and noise all sat at 0%.
 
    But smooth resampling does not destroy the grid, it MOVES it. After a
    bilinear upscale a scanline is piecewise-LINEAR with knots exactly at the
    cell boundaries, and the second difference of a piecewise-linear signal is
    exactly zero except at those knots. So |x[i-1] - 2x[i] + x[i+1]| averaged
    down the scanlines is an impulse train whose period IS the cell size —
-   strongest precisely where the variance signal is weakest.
+   strongest precisely where the variance signal is weakest. boundaryMaps
+   keeps it alongside the first difference for that reason.
 
-   Recovering the period of that train is a fundamental-frequency problem, and
-   the classical trap is the octave error (answering 2T or T/2). Plain
-   autocorrelation has it badly. YIN's cumulative mean normalised difference
-   function is the standard fix from pitch detection:
-
-       d(T)  = sum_i (p[i] - p[i+T])^2
-       d'(T) = d(T) / [ (1/T) sum_{j=1..T} d(j) ]
-
-   The running-mean denominator removes the bias that makes small T always look
-   good, and then taking the SMALLEST T under an absolute threshold — rather
-   than the global minimum — structurally prefers the fundamental over its
-   multiples, because 2T can only be reached after T has already been rejected.
+   A YIN pitch estimator used to run on this profile as a second detector.
+   It was a fine proposer and a near-useless judge (10.9% alone): d' dips just
+   as deeply at every multiple of the period, so it cannot tell a fundamental
+   from a harmonic. Rayleigh coherence replaced it and the code is gone.
 */
 
-/** Mean |second difference| down the scanlines: an impulse train at the cell
- *  boundaries. Deliberately NOT quantised — quantising snaps the smooth ramp
- *  flat and destroys the very knots this is looking for. */
-function boundaryProfile(img, box, axis){
-  const {x0, y0, cw, ch} = box;
-  const sd = img.data, sw = img.width;
-  const len  = axis === 0 ? cw : ch;
-  const nAll = axis === 0 ? ch : cw;
-  if(len < 16) return null;
-  const stride = Math.max(1, Math.ceil(nAll/GRID.MAX_LINES));
-  const p = new Float64Array(len);
-  const row = new Float64Array(len);
-  const alp = new Float64Array(len);
-  let lines = 0;
-  for(let t=0; t<nAll; t+=stride){
-    for(let i=0; i<len; i++){
-      const x = axis === 0 ? i : t, y = axis === 0 ? t : i;
-      const s = ((y0+y)*sw + x0+x)*4;
-      row[i] = (0.299*sd[s] + 0.587*sd[s+1] + 0.114*sd[s+2])/255;
-      alp[i] = sd[s+3]/255;
-    }
-    for(let i=1; i<len-1; i++){
-      p[i] += Math.abs(row[i-1] - 2*row[i] + row[i+1])
-            + Math.abs(alp[i-1] - 2*alp[i] + alp[i+1]);
-    }
-    lines++;
-  }
-  if(!lines) return null;
-  for(let i=0; i<len; i++) p[i] /= lines;
-  /* de-mean so the difference function measures shape, not level */
-  let m = 0;
-  for(let i=0; i<len; i++) m += p[i];
-  m /= len;
-  for(let i=0; i<len; i++) p[i] -= m;
-  return p;
-}
-
-/**
- * YIN period estimate on a 1D profile.
- * Returns the smallest period whose normalised difference clears the
- * threshold — the octave-safe answer — with a parabolic sub-sample refinement,
- * plus its d' value as a confidence (lower is better).
- */
-function yinPeriod(p, lo, hi){
-  const n = p.length;
-  hi = Math.min(hi, Math.floor(n/2));
-  if(hi <= lo || hi < 2) return null;
-  const d = new Float64Array(hi+1);
-  for(let T=1; T<=hi; T++){
-    let s = 0;
-    const lim = n - T;
-    for(let i=0; i<lim; i++){ const v = p[i] - p[i+T]; s += v*v; }
-    d[T] = s/lim;                       /* per-sample, so T does not bias it */
-  }
-  const dp = new Float64Array(hi+1);
-  dp[0] = 1;
-  let run = 0;
-  for(let T=1; T<=hi; T++){
-    run += d[T];
-    dp[T] = run > 0 ? d[T]*T/run : 1;
-  }
-  /* smallest T under the threshold, walking to the local minimum of its dip */
-  let best = -1;
-  for(let T=Math.max(2, Math.ceil(lo)); T<=hi; T++){
-    if(dp[T] < GRID.YIN_THRESH){
-      while(T+1 <= hi && dp[T+1] < dp[T]) T++;
-      best = T; break;
-    }
-  }
-  if(best < 0){                          /* nothing cleared it: take the best dip */
-    let bv = Infinity;
-    for(let T=Math.max(2, Math.ceil(lo)); T<=hi; T++) if(dp[T] < bv){ bv = dp[T]; best = T; }
-    if(best < 0 || bv > GRID.YIN_MAX) return null;
-  }
-  /* parabolic interpolation around the minimum for a sub-pixel period */
-  let period = best;
-  if(best > 1 && best < hi){
-    const a = dp[best-1], b = dp[best], c = dp[best+1];
-    const den = a - 2*b + c;
-    if(Math.abs(den) > 1e-12) period = best + 0.5*(a - c)/den;
-  }
-  return {period, conf: dp[best]};
-}
-
-function detectYinAxis(img, box, axis){
-  const p = boundaryProfile(img, box, axis);
-  if(!p) return null;
-  const len = axis === 0 ? box.cw : box.ch;
-  const lo = Math.max(GRID.MIN_STEP, len/GRID.MAX_NATIVE);
-  const hi = Math.min(GRID.MAX_STEP, len/4);
-  if(hi <= lo) return null;
-  const r = yinPeriod(p, lo, hi);
-  if(!r || r.period < lo*0.9) return null;
-  return r;
-}
-
-/** The whole d' curve, so the arbiter can ask YIN's opinion of a step that
- *  YIN did not itself propose. */
-function yinCurve(img, box, axis){
-  const p = boundaryProfile(img, box, axis);
-  if(!p) return null;
-  const n = p.length;
-  const len = axis === 0 ? box.cw : box.ch;
-  const hi = Math.min(Math.floor(n/2), Math.min(GRID.MAX_STEP, len/4) | 0);
-  if(hi < 3) return null;
-  const d = new Float64Array(hi+1), dp = new Float64Array(hi+1);
-  for(let T=1; T<=hi; T++){
-    let sm = 0; const lim = n - T;
-    for(let i=0; i<lim; i++){ const v = p[i] - p[i+T]; sm += v*v; }
-    d[T] = sm/lim;
-  }
-  dp[0] = 1;
-  let run = 0;
-  for(let T=1; T<=hi; T++){ run += d[T]; dp[T] = run > 0 ? d[T]*T/run : 1; }
-  return {dp, hi};
-}
-/** YIN's verdict on an arbitrary step: 1 is a perfect period, 0 is nothing. */
-function yinAt(yc, s){
-  if(!yc || s < 2 || s > yc.hi) return 0;
-  const i = Math.floor(s), f = s - i;
-  const a = yc.dp[i], b = yc.dp[Math.min(yc.hi, i+1)];
-  const v = a + (b-a)*f;
-  return Math.max(0, 1 - v/GRID.YIN_MAX);
-}
 
 /** Error and phase-contrast curves over a geometric ladder of steps.
  *  Phase count scales with the step, which keeps the cost per candidate
@@ -1524,18 +1432,13 @@ function distillAxis(img, box, QP, axis){
   const lo = Math.max(GRID.MIN_STEP, len/GRID.MAX_NATIVE);
   const hi = Math.min(GRID.MAX_STEP, len/4);
   if(hi <= lo) return null;
+  const nbr = Math.max(1, Math.min(GRID.ROWBLOCKS, Math.floor(lines/8)));
   for(let s = lo; s <= hi; s *= GRID.RATIO){
     const n = Math.max(8, Math.min(GRID.MAX_PHASE, Math.round(2*s))) & ~1;
-    let best = -Infinity, bi = 0;
-    const es = new Float64Array(n);
-    for(let j=0; j<n; j++){
-      es[j] = gridEnergy(S, lines, len, s, j*s/n);
-      if(es[j] > best){ best = es[j]; bi = j; }
-    }
-    const anti = es[(bi + (n>>1)) % n];      /* the maximally wrong phase */
-    out.push({s, err:(Qtot - best)/T, con:(best - anti)/T, phase: bi*s/n});
+    const r = phaseScan(S, lines, len, s, nbr, n);
+    out.push({s, err:(Qtot - r.best)/T, con:(r.best - r.anti)/T});
   }
-  return {cand: out, S, Q, lines, len, Qtot, T};
+  return {cand: out, S, Q, lines, len, Qtot, T, nbr};
 }
 
 /**
@@ -1559,88 +1462,7 @@ function distillAxis(img, box, QP, axis){
  * error, so the true step can miss a fixed threshold while its own half
  * — which happened to land nearer a ladder rung — sneaks under it.
  */
-/** score(s) = contrast * max(1 - err/trend), trend = running median of the
- *  error in a log-window. Exposed as a curve so the arbiter can ask
- *  distillability's opinion of a step it did not itself propose. */
-function distScoreCurve(A){
-  const cand = A.cand, n = cand.length;
-  const ls = cand.map(c => Math.log(c.s));
-  const scored = new Float64Array(n);
-  const trend = new Float64Array(n);
-  const win = [];
-  for(let i=0; i<n; i++){
-    win.length = 0;
-    for(let j=0; j<n; j++) if(Math.abs(ls[j] - ls[i]) <= 0.14) win.push(cand[j].err);
-    win.sort((p,q) => p-q);
-    trend[i] = Math.max(1e-6, win[win.length >> 1]);
-    scored[i] = Math.max(cand[i].con, 0) * Math.max(1 - cand[i].err/trend[i], 0);
-  }
-  scored.trend = trend;
-  return scored;
-}
-/** the local misaligned-grid baseline at an arbitrary step */
-function trendAt(A, scored, s){
-  const cand = A.cand, tr = scored.trend;
-  if(!cand.length) return 1e-6;
-  if(s <= cand[0].s) return tr[0];
-  if(s >= cand[cand.length-1].s) return tr[cand.length-1];
-  let i = 0;
-  while(i < cand.length-1 && cand[i+1].s < s) i++;
-  const a = Math.log(cand[i].s), b = Math.log(cand[i+1].s), t = (Math.log(s)-a)/Math.max(1e-9,b-a);
-  return tr[i] + (tr[i+1]-tr[i])*t;
-}
-/** distillability's verdict on an arbitrary step (log-interpolated). */
-function distAt(A, scored, s){
-  const cand = A.cand;
-  if(!cand.length || s < cand[0].s || s > cand[cand.length-1].s) return 0;
-  let i = 0;
-  while(i < cand.length-1 && cand[i+1].s < s) i++;
-  if(i >= cand.length-1) return scored[cand.length-1];
-  const a = Math.log(cand[i].s), b = Math.log(cand[i+1].s), t = (Math.log(s)-a)/Math.max(1e-9, b-a);
-  return scored[i] + (scored[i+1]-scored[i])*t;
-}
 
-function pickStep(A){
-  if(!A || !A.cand.length) return null;
-  const cand = A.cand, n = cand.length;
-  const scored = distScoreCurve(A);
-  /* Cap at the DETAIL SCALE before choosing. Without this the score picks
-     content scale: on a character the strongest vertical rhythm is the
-     head/torso/legs banding, and a 48px grid locks onto it three times harder
-     than the true 8px grid. But that grid destroys 5% of the image variance,
-     and the native grid by definition destroys almost none — a 48px cell
-     cannot coexist with 8px detail. The cap is relative to the error a
-     merely-misaligned grid gets at the finest scales, so it adapts to how
-     damaged the image is: on a bilinear smear every grid loses more, and the
-     bar moves with it. */
-  let floor = Infinity;
-  for(const c of cand) if(c.err < floor) floor = c.err;
-  const cap = floor + Math.max(GRID.ERR_TOL, floor*GRID.CAP_K);
-
-  let bi = -1, bs = 0;
-  for(let i=0; i<n; i++){
-    if(cand[i].err > cap) continue;
-    if(scored[i] > bs){ bs = scored[i]; bi = i; }
-  }
-  if(bi < 0 || bs < GRID.C_FLOOR) return null;
-  const w = cand[bi];
-
-  /* Refine: a 1% step error de-phases the grid across a wide image, so the
-     ladder rung is rarely the exact answer. */
-  let best = w;
-  for(let s = w.s*0.96; s <= w.s*1.045; s *= 1.003){
-    const ph = Math.max(12, Math.min(48, Math.round(4*s))) & ~1;
-    let e = -Infinity;
-    for(let j=0; j<ph; j++){
-      const v = gridEnergy(A.S, A.lines, A.len, s, j*s/ph);
-      if(v > e) e = v;
-    }
-    const err = (A.Qtot - e)/A.T;
-    if(err < best.err) best = {s, err, con:w.con};
-  }
-  best.score = bs;
-  return best;
-}
 
 /**
  * Per-axis grid detection. Returns steps, the native cell counts they imply,
@@ -1654,17 +1476,42 @@ function detectGrid(img, box){
   if(!ax && !ay) return null;
   /* ALREADY-NATIVE GUARD.
      Every input in pixel-bench is upscaled, so a detector tuned only on it
-     learns to never refuse and then destroys the native art a user drops in
-     (measured: a 48x48 native sprite came back as 12x19). The test is
-     physical: a real grid is near-LOSSLESS, because each cell really was one
-     source pixel. On art that is already native, every step >= 2 averages
-     genuinely different pixels together, so the best available grid still
-     destroys a large share of the variance. Counting how often adjacent
-     pixels differ does NOT work for this - measured, native art scores 0.19
-     and noisy upscaled art 0.63, the wrong way round, because real sprites
-     have large flat regions. */
-  const loss = Math.min(ax ? ax.loss : 1, ay ? ay.loss : 1);
-  if(loss > GRID.NATIVE_LOSS) return null;
+     learns to never refuse and then destroys the native art a user drops in.
+     The benchmark is structurally blind to that failure, so it has to be
+     measured separately — over 80 genuinely native sprites, the residual test
+     that used to stand here let 78% of them be rewritten, a 48x48 sprite
+     coming back as 9x11.
+
+     The reason it failed is that "a grid destroys little variance" is not
+     actually a property of upscaled art. Real sprites are mostly flat
+     regions, so collapsing 4x4 blocks of native art loses almost nothing
+     either: native residual measured a median of 0.131 against 0.056 for
+     upscaled, two clouds sitting on top of each other. Meanwhile heavy noise
+     pushes genuinely upscaled art the other way past any fixed threshold,
+     which is why the noise and chroma_noise categories were being refused
+     outright.
+
+     The honest test is not how much a grid costs but whether one is THERE:
+     the coherence peak has to stand clear of the incoherent floor of its own
+     spectrum. That ratio is scale-free and noise-tolerant, since noise lifts
+     peak and floor together, and it separates the same two populations at
+     AUC 0.95 where the residual manages 0.80.
+
+     BOTH axes have to clear it, not either. An upscale is a two-dimensional
+     operation, so a real grid shows up twice; native art that happens to have
+     one periodic direction — a dither band, a row of identical tiles — does
+     not. Taking the weaker axis rather than the stronger one moves the whole
+     trade-off curve outward instead of sliding along it: at equal
+     native-safety it is worth about two points of benchmark score, which no
+     amount of tuning the threshold on the either-axis rule could buy.
+
+     The residual test used to stand alongside this as a second gate. Once
+     both axes have to agree it is pure cost: removing it was worth 1.1 points
+     of benchmark score for 1.3 points of native-safety, and it was what
+     refused the `noise` and `chroma_noise` categories outright. Coherence
+     subsumes it. */
+  const contrast = Math.min(ax ? ax.contrast : 0, ay ? ay.contrast : 0);
+  if(contrast < GRID.NATIVE_R) return null;
   let sx = ax ? ax.s : ay.s;
   let sy = ay ? ay.s : ax.s;
   const con = Math.min(ax ? ax.score : 1, ay ? ay.score : 1);
@@ -1700,11 +1547,19 @@ function detectGrid(img, box){
        they think of each candidate and keep the one the image as a whole
        supports. Trusting whichever axis reported the higher confidence does
        not work — that score saturates when a single axis's two detectors
-       agree, so a confidently wrong axis outranks a correct one. */
+       agree, so a confidently wrong axis outranks a correct one.
+
+       Independence is a third option, but it is not free: two steps is one
+       more parameter than one step, and each axis judged on its own pick will
+       always score at least as well as either shared choice. So it has to
+       clear the better shared option by a margin before the extra freedom is
+       granted — the same argument that prices cells in the ranking, applied
+       to the model rather than the grid. */
     const jx = ax.judge(sx) + ay.judge(sx);
     const jy = ax.judge(sy) + ay.judge(sy);
-    const s = jx >= jy ? sx : sy;
-    sx = s; sy = s;
+    const ji = ax.judge(sx) + ay.judge(sy);
+    const shared = jx >= jy ? sx : sy;
+    if(!(ji > Math.max(jx, jy)*(1 + GRID.NONSQ))){ sx = shared; sy = shared; }
   }
   const {cw, ch} = box;
   return {
@@ -1716,259 +1571,219 @@ function detectGrid(img, box){
   };
 }
 
-/**
- * ARBITRATION — two independent detectors propose, both judge.
- *
- * Distillability (within-cell variance) and YIN (period of the second-
- * difference impulse train) fail on different images, which is exactly what
- * makes combining them worth anything. Measured separately across 43
- * distortion categories: distillability gets 100% on clean integer upscales
- * and 0% on bilinear/mush/dead_cells; YIN gets 0% on clean and 50%/25%/38% on
- * those same three. Neither dominates; each is silent where the other speaks.
- *
- * So rather than trusting whichever fired, both score every candidate — and
- * the candidate set deliberately includes each proposal's HALF and DOUBLE.
- * Octave errors are the central failure mode of every periodicity estimator,
- * and the cheapest way to fix one detector's octave slip is to ask a detector
- * with different physics which octave it prefers.
- *
- * Each detector's opinion is normalised by its own best over the candidate
- * set, so a detector with no signal spreads flat, near-equal values across all
- * candidates and cannot outvote one that is discriminating sharply. That is
- * self-weighting: confidence is expressed as contrast, not as a tuned weight.
- */
-/**
- * TILE-INTEGRATED STEP — for grids that are not globally uniform.
- *
- * A drifting, warped or block-reset grid has no single (step, phase) that fits
- * the whole axis, and forcing one does not merely lose precision: the fit
- * collapses and the answer comes back wildly coarse (a 24x24 sprite under
- * mush_warp was being called 7x7). But the grid is still locally regular, so
- * estimate the step in each of a few windows and integrate the CELL COUNTS
- * rather than averaging the steps:
- *
- *     cells = sum over tiles of tileLen / step_tile
- *
- * Summing counts is the right operation because cells are what tile together;
- * averaging steps would let one bad window drag the whole estimate, and a
- * harmonic mean over unequal windows is not what the geometry says. The median
- * across tiles guards the rest.
- *
- * This rides on YIN rather than distillability because it has to run several
- * times per axis and YIN is two orders of magnitude cheaper.
- */
-function tileStep(img, box, axis, nTiles){
-  const {x0, y0, cw, ch} = box;
-  const len = axis === 0 ? cw : ch;
-  const tl = Math.floor(len/nTiles);
-  if(tl < 24) return null;
-  const lo = Math.max(GRID.MIN_STEP, tl/GRID.MAX_NATIVE);
-  const hi = Math.min(GRID.MAX_STEP, tl/4);
-  if(hi <= lo) return null;
-  const per = [];
-  for(let t=0; t<nTiles; t++){
-    const sub = axis === 0
-      ? {x0: x0 + t*tl, y0, cw: tl, ch}
-      : {x0, y0: y0 + t*tl, cw, ch: tl};
-    const p = boundaryProfile(img, sub, axis);
-    if(!p) continue;
-    const r = yinPeriod(p, lo, hi);
-    if(r && r.period >= lo && r.period <= hi) per.push(r.period);
+/* ────────────────────────────────────────────────
+   RANKING — Rayleigh phase coherence over integer cell counts
+   ────────────────────────────────────────────────
+
+   Diagnosing 688 axes showed the real problem was not detection at all:
+   the candidate set already contained the correct cell count 92.3% of the
+   time, and the arbiter picked it 51.3%. Forty-one points were being thrown
+   away by RANKING, not by any missing signal. YIN in particular is a fine
+   proposer and a near-useless judge (10.9% alone) — d' dips just as deeply at
+   every multiple of the period, so it cannot tell a fundamental from a
+   harmonic, yet it carried equal weight in the fusion.
+
+   Two changes follow from that.
+
+   FIRST, rank by Rayleigh phase coherence of the boundary energy rather than
+   by within-cell variance. R(s) = |sum_x p(x) e^(-2*pi*i*x/s)| / sum_x p(x)
+   is a soft GCD: if boundaries sit at multiples of d then R(d) = 1 and
+   R(2d) ~ 0, because alternate boundaries land in antiphase. It is therefore
+   STRUCTURALLY incapable of the too-coarse error, which was 166 of 212 axis
+   failures. Two maps are used because they survive different damage — the
+   first difference peaks on the cut and lives through heavy low-pass, the
+   second difference peaks at the knots of a piecewise-linear ramp and lives
+   through bilinear upscaling. Under blur the d2 coherence at the true step
+   measured 0.002 while a content lock scored 0.233; d1 rescued it.
+
+   SECOND, the candidate set is exactly the integer cell counts { len/n },
+   because a grid must divide the axis a whole number of times. And since
+   2*pi*x/s = 2*pi*n*x/len, the comb score over that whole space IS the
+   magnitude spectrum of the boundary profile — one transform ranks every
+   admissible answer exactly, with no ladder, no interpolation and no
+   sub-pixel refinement. The ladder it replaces provably could not resolve
+   adjacent cell counts: the comb peak has width ~ s^2/L, which at s=5,
+   L=250 is 0.05px against a rung spacing of 0.10px.
+*/
+/** Boundary-energy maps for the comb: |first difference| (peaks ON the cut,
+ *  survives heavy low-pass) and |second difference| (peaks at the knots of a
+ *  piecewise-linear ramp, survives bilinear/bicubic upscaling). Each is kept
+ *  both as one whole-axis profile and as BANDS of scanlines, so a lattice
+ *  whose phase drifts down the image is still read band by band. */
+function boundaryMaps(img, box, axis, B){
+  const {x0, y0, cw, ch} = box, sd = img.data, sw = img.width;
+  const len = axis === 0 ? cw : ch, nAll = axis === 0 ? ch : cw;
+  if(len < 16) return null;
+  const stride = Math.max(1, Math.ceil(nAll/GRID.MAX_LINES));
+  const nl = Math.ceil(nAll/stride);
+  B = Math.max(1, Math.min(B, Math.max(1, Math.floor(nl/3))));
+  const P2 = [], P1 = [], cnt = new Int32Array(B);
+  for(let b=0;b<B;b++){ P2.push(new Float64Array(len)); P1.push(new Float64Array(len)); }
+  const row = new Float64Array(len), alp = new Float64Array(len);
+  let l = 0;
+  for(let t=0; t<nAll; t+=stride, l++){
+    const b = Math.min(B-1, Math.floor(l*B/nl));
+    for(let i=0;i<len;i++){
+      const x = axis === 0 ? i : t, y = axis === 0 ? t : i;
+      const o = ((y0+y)*sw + x0+x)*4;
+      row[i] = (0.299*sd[o] + 0.587*sd[o+1] + 0.114*sd[o+2])/255;
+      alp[i] = sd[o+3]/255;
+    }
+    const p2 = P2[b], p1 = P1[b];
+    for(let i=1;i<len-1;i++) p2[i] += Math.abs(row[i-1] - 2*row[i] + row[i+1]) + Math.abs(alp[i-1] - 2*alp[i] + alp[i+1]);
+    for(let i=0;i<len-1;i++) p1[i] += Math.abs(row[i+1] - row[i]) + Math.abs(alp[i+1] - alp[i]);
+    cnt[b]++;
   }
-  if(per.length < Math.max(2, nTiles-1)) return null;
-  /* median of the per-tile cell densities, then scaled back to a step */
-  const dens = per.map(s => 1/s).sort((a,b) => a-b);
-  const md = dens[dens.length >> 1];
-  if(!(md > 0)) return null;
-  const s = 1/md;
-  if(s < GRID.MIN_STEP || s > GRID.MAX_STEP) return null;
-  /* how much the windows disagree — the direct evidence that the grid is not
-     globally uniform, which no global score can express */
-  let mu = 0;
-  for(const d of dens) mu += d;
-  mu /= dens.length;
-  let v = 0;
-  for(const d of dens) v += (d-mu)*(d-mu);
-  const cv = mu > 0 ? Math.sqrt(v/dens.length)/mu : 0;
-  return {s, cv, n: per.length};
+  const norm = arr => {
+    const bands = [], gl = new Float64Array(len);
+    for(let b=0;b<arr.length;b++){
+      if(!cnt[b]) continue;
+      const p = arr[b];
+      for(let i=0;i<len;i++){ p[i] /= cnt[b]; gl[i] += p[i]; }
+      let mn = Infinity; for(let i=0;i<len;i++) if(p[i] < mn) mn = p[i];
+      let W = 0, W2 = 0;
+      for(let i=0;i<len;i++){ p[i] -= mn; W += p[i]; W2 += p[i]*p[i]; }
+      if(W > 1e-9) bands.push({p, W, neff: W2 > 0 ? W*W/W2 : 0});
+    }
+    let mn = Infinity; for(let i=0;i<len;i++) if(gl[i] < mn) mn = gl[i];
+    let W = 0, W2 = 0;
+    for(let i=0;i<len;i++){ gl[i] -= mn; W += gl[i]; W2 += gl[i]*gl[i]; }
+    return {bands, glob: W > 1e-9 ? [{p:gl, W, neff: W2 > 0 ? W*W/W2 : 0}] : []};
+  };
+  return {len, d2: norm(P2), d1: norm(P1)};
 }
+
+/** Rayleigh phase coherence at step s, averaged over a set of profiles:
+ *  |sum_x p(x) e^{-2*pi*i*x/s}| / sum_x p(x). 1 means every boundary in the
+ *  profile sits at the same phase of a lattice of pitch s; a lattice of pitch
+ *  2s scores ~0 because alternate boundaries land in antiphase. */
+function raylAt(set, len, s){
+  if(!set || !set.length || s < 2) return 0;
+  const f = 2*Math.PI/s;
+  let tot = 0;
+  for(const {p, W} of set){
+    let re = 0, im = 0;
+    for(let i=0;i<len;i++){ const v = p[i]; if(v > 0){ re += v*Math.cos(f*i); im += v*Math.sin(f*i); } }
+    tot += Math.sqrt(re*re + im*im)/W;
+  }
+  return tot/set.length;
+}
+
+
 
 /** How much of the axis variance a grid at this step would destroy, at its
  *  best phase. Absolute, not relative to a trend — used to tell "this is the
  *  grid" from "this is the least-bad way to wreck the image". */
 function lossAt(A, s){
   const nph = Math.max(8, Math.min(GRID.MAX_PHASE, Math.round(2*s))) & ~1;
-  let best = -Infinity;
-  for(let j=0; j<nph; j++){
-    const v = gridEnergy(A.S, A.lines, A.len, s, j*s/nph);
-    if(v > best) best = v;
+  return (A.Qtot - phaseScan(A.S, A.lines, A.len, s, A.nbr, nph).best)/A.T;
+}
+
+/**
+ * Is a coherence peak real, or could noise have produced it?
+ *
+ * R is normalised by the total profile energy, so additive noise inflates the
+ * denominator and deflates R uniformly across the whole image — which makes an
+ * absolute floor exactly the wrong test, and it showed: `noise` refused 8 of 8
+ * and `chroma_noise` 4 of 8, not because the grid was undetectable but because
+ * a tuned constant had drifted out from under them.
+ *
+ * Under the null hypothesis of randomly-phased boundaries, the Rayleigh
+ * statistic Z = n_eff * R^2 is approximately exponential, so
+ *     p ~ e^-Z * [1 + (2Z - Z^2)/(4 n_eff)]
+ * with Kish's effective count n_eff = (sum p)^2 / sum p^2 accounting for the
+ * profile being weighted rather than a plain set of points. Bonferroni over
+ * the candidates turns this into a false-alarm rate, which is scale-free in
+ * both image size and noise level — a criterion instead of a constant.
+ */
+function raylP(sets, len, s, nCand){
+  let best = 1;
+  for(const set of sets){
+    for(const {p, W, neff} of (set || [])){
+      if(!(neff > 1)) continue;
+      const f = 2*Math.PI/s;
+      let re = 0, im = 0;
+      for(let i=0;i<len;i++){ const v = p[i]; if(v > 0){ re += v*Math.cos(f*i); im += v*Math.sin(f*i); } }
+      const R = Math.sqrt(re*re + im*im)/W;
+      const Z = neff*R*R;
+      let pv = Math.exp(-Z)*(1 + (2*Z - Z*Z)/(4*neff));
+      pv = Math.min(1, Math.max(0, pv))*nCand;          /* Bonferroni */
+      if(pv < best) best = pv;
+    }
   }
-  return (A.Qtot - best)/A.T;
+  return best;
 }
 
 function detectAxis(img, box, QP, axis){
   const len = axis === 0 ? box.cw : box.ch;
   const A  = distillAxis(img, box, QP, axis);
-  const yc = yinCurve(img, box, axis);
-  if(!A && !yc) return null;
+  const M  = boundaryMaps(img, box, axis, GRID.BANDS);
+  if(!A && !M) return null;
 
-  const scored = A ? distScoreCurve(A) : null;
   const lo = Math.max(GRID.MIN_STEP, len/GRID.MAX_NATIVE);
   const hi = Math.min(GRID.MAX_STEP, len/4);
+  const nHi = Math.floor(len/lo), nLo = Math.max(2, Math.ceil(len/hi));
+  if(nHi < nLo) return null;
 
-  /* --- proposals --- */
-  const props = [];
-  if(A){
-    const w = pickStep(A);
-    if(w) props.push(w.s);
-    /* the strongest few local maxima of the distillability score, so the
-       arbiter is not limited to that detector's own final answer */
-    for(let i=1; i<scored.length-1; i++){
-      if(scored[i] > scored[i-1] && scored[i] >= scored[i+1] && scored[i] > 0) props.push(A.cand[i].s);
-    }
-  }
-  if(yc){
-    const p = boundaryProfile(img, box, axis);
-    if(p){ const r = yinPeriod(p, lo, hi); if(r) props.push(r.period); }
-    for(const k of [3, 5]){
-      const ts = tileStep(img, box, axis, k);
-      if(ts) props.push(ts.s);
-    }
-    for(let T=3; T<yc.hi-1; T++){
-      if(yc.dp[T] < yc.dp[T-1] && yc.dp[T] <= yc.dp[T+1] && yc.dp[T] < GRID.YIN_MAX) props.push(T);
-    }
-  }
-  if(!props.length) return null;
-
-  /* --- candidates: every proposal, plus its half and double --- */
+  /* every admissible integer cell count — the entire search space */
   const cands = [];
-  const seen = [];
-  for(const p of props) for(const m of [0.5, 1, 2]){
-    const s = p*m;
-    if(s < lo || s > hi) continue;
-    if(seen.some(q => Math.abs(q - s)/s < 0.02)) continue;
-    seen.push(s); cands.push(s);
-  }
-  if(!cands.length) return null;
-  cands.sort((a,b) => a-b);
+  for(let n=nLo; n<=nHi; n++) cands.push(len/n);
 
-  /* --- both judge, but NOT as equals ---
-     Normalising each detector by its own best gives it full voting power even
-     when it is confidently wrong, and "no signal" does not mean "flat curve":
-     a detector can have a sharp spurious peak. Measured on a resize-chained
-     image that ends in an exact 3x upscale, YIN correctly locks onto the 3px
-     RESAMPLING lattice and outvotes the 23.9px ART lattice — both are real
-     periodicities, but only one is the pixel grid.
-     Distillability is the one that can tell them apart, because it asks
-     whether cells are internally uniform in colour, which is true of an art
-     grid and false of a resampling grid. So distillability leads whenever it
-     has real evidence, and YIN decides only where distillability is silent —
-     which is exactly the split the two measured: 100%/0% on clean upscales,
-     0%/50% on bilinear smear. */
-  const dv = cands.map(s => A ? Math.max(0, distAt(A, scored, s)) : 0);
-  const yv = cands.map(s => yinAt(yc, s));
-  const dMax = Math.max(...dv), yMax = Math.max(...yv);
-  const wY = Math.max(0, 1 - dMax/GRID.D_STRONG);   /* YIN's say, 1 down to 0 */
-  let bi = -1, bs = -1;
-  const total = cands.map((s, i) => {
-    const d = dMax > 0 ? dv[i]/dMax : 0;
-    const y = yMax > 0 ? yv[i]/yMax : 0;
-    return d + wY*y;
-  });
+  const combAt = cs => M
+    ? Math.max(raylAt(M.d1.glob, M.len, cs), raylAt(M.d1.bands, M.len, cs))
+    + Math.max(raylAt(M.d2.glob, M.len, cs), raylAt(M.d2.bands, M.len, cs))
+    : 0;
+  const comb = cands.map(combAt);
+
+  /* The variance gate is the expensive half, so only a shortlist pays for it.
+     Coherence says "boundaries line up at this pitch"; the gate says "and
+     collapsing the cells does not destroy the picture". Both are needed:
+     coherence alone cannot see that a grid is too fine. */
+  const gate = l => Math.pow(Math.max(0, 1 - l), GRID.LOSS_POW);
+  const order = comb.map((v,i) => i).sort((p,q) => comb[q]-comb[p]).slice(0, 16);
+  const total = new Float64Array(cands.length);
+  for(const i of order) total[i] = comb[i]*gate(A ? lossAt(A, cands[i]) : 0.5);
+
+  let bi = 0, bs = -1;
   for(let i=0; i<cands.length; i++) if(total[i] > bs){ bs = total[i]; bi = i; }
+  if(bs <= 0) return null;
+  if(M && raylP([M.d1.glob, M.d1.bands, M.d2.glob, M.d2.bands], M.len, cands[bi],
+                cands.length) > GRID.PVAL) return null;
 
-  /* COMPLEXITY PENALTY (MDL), applied among the near-winners.
-     The two octave directions are not symmetric. A too-COARSE grid destroys
-     variance, so fit detects it easily. A too-FINE grid fits perfectly —
-     splitting one cell into four identical quarters has exactly zero residual
-     — so no goodness-of-fit measure can ever rule it out. Preferring the
-     smallest near-winner therefore has no floor, and it fell straight through
-     to the minimum step on ghosted composites (subpixel_shift landed on
-     step 2.0 for a true step of 4.1).
-     So instead of "take the smallest", pay for cells: describing the image as
-     n cells costs about n units, and the residual costs about (len/2)·log(err).
-     A finer grid must reduce the residual enough to pay for the extra cells,
-     and a merely-subdividing grid reduces it by nothing. */
-  const slack = bs*GRID.HYG;
-  let bestCost = Infinity, bj = bi;
-  for(let i=0; i<cands.length; i++){
-    if(total[i] < slack) continue;
-    const e = A ? lossAt(A, cands[i]) : 0.5;
-    const cost = 0.5*Math.log(e + 1e-4) + GRID.MDL/cands[i];
-    if(cost < bestCost){ bestCost = cost; bj = i; }
+  /* OCTAVE-UP WALK.
+     A soft GCD ties on subdivisions — R(d/2) equals R(d) for a perfect
+     lattice — so the ranking drifts too FINE, and after the changes above
+     "one octave too fine" became the single largest error bucket. The tie
+     breaks on an asymmetry: if d is the truth then R(2d) is ~0, but if the
+     candidate is d/2 then R(2*(d/2)) = R(d) is still high. So walk to the
+     half count while its coherence holds up. Judged on COMB ONLY — the loss
+     gate systematically favours finer grids and would fight the walk. */
+  let bj = bi;
+  for(let it=0; it<4; it++){
+    const j = Math.round((nLo + bj)/2) - nLo;
+    if(j < 0 || j >= cands.length || j === bj) break;
+    if(comb[j] >= GRID.OCT*comb[bj]) bj = j; else break;
   }
   bi = bj;
 
-  if(bs < GRID.FUSE_FLOOR) return null;
+  const n = Math.max(2, Math.round(len/cands[bi]));
+  const s = len/n;
 
-  /* INTEGER CELL COUNT.
-     The grid has to divide the axis into a whole number of cells, so the only
-     steps that can be right are len/n for integer n. A step 1% off puts
-     len/step at 49.6 and rounding takes it to 50 — or to 49, and the whole
-     sprite is a cell short. Measured, that off-by-one was the single biggest
-     remaining bucket: 62.8% of cases were within one cell but only 52.3% were
-     exact. So snap to the integer counts around the winner and let both
-     detectors judge which one the image actually supports, instead of
-     rounding blind. */
-  let s = cands[bi];
-  const n0 = Math.round(len/s);
-  /* Judged by MEASURING each candidate, not by interpolating the ladder:
-     adjacent integer counts differ by 1/n, which for a 50-cell sprite is 2% —
-     the same as the ladder spacing, so an interpolated score cannot tell them
-     apart. Re-running the phase search at each len/n can. */
-  /* the same contrast x alignment-advantage score as the main curve, but
-     MEASURED at this step rather than interpolated: raw error alone is not a
-     discriminator, since it falls monotonically as cells get smaller and would
-     always pick the largest cell count. */
-  const measure = cs => {
-    if(!A) return 0;
-    const nph = Math.max(8, Math.min(GRID.MAX_PHASE, Math.round(2*cs))) & ~1;
-    const es = new Float64Array(nph);
-    let best = -Infinity, bj = 0;
-    for(let j=0; j<nph; j++){
-      es[j] = gridEnergy(A.S, A.lines, A.len, cs, j*cs/nph);
-      if(es[j] > best){ best = es[j]; bj = j; }
-    }
-    const anti = es[(bj + (nph>>1)) % nph];
-    const err = (A.Qtot - best)/A.T, con = (best - anti)/A.T;
-    const tr = trendAt(A, scored, cs);
-    return Math.max(0, con) * Math.max(0, 1 - err/tr);
-  };
-  let bn = s, bnScore = -Infinity;
-  const dm = [], ym = [], ss = [];
-  for(let n = Math.max(2, n0-2); n <= n0+2; n++){
-    const cs = len/n;
-    if(cs < lo || cs > hi) continue;
-    ss.push(cs); dm.push(measure(cs)); ym.push(yinAt(yc, cs));
-  }
-  const dMx = Math.max(...dm, 1e-12), yMx = Math.max(...ym, 1e-12);
-  for(let i=0; i<ss.length; i++){
-    const v = dm[i]/dMx + ym[i]/yMx;
-    if(v > bnScore){ bnScore = v; bn = ss[i]; }
-  }
-  s = bn;
+  /* PEAK-TO-FLOOR CONTRAST — how far the winner stands above the incoherent
+     background of its OWN spectrum. This is what says a grid is really there,
+     and it is the number the already-native guard should be reading. It is
+     scale-free, which an absolute residual is not: measured over 116 native
+     axes against 688 upscaled ones it separates them at AUC 0.95, where the
+     residual test manages 0.80 and is barely better than a coin inside the
+     band where the two populations overlap in size. */
+  const sortc = [...comb].sort((a,b) => a-b);
+  const floor = sortc[sortc.length >> 1] || 1e-9;
+  const contrast = comb[bi]/floor;
 
-  /* Two things were tried here and removed, recorded so they are not retried:
-     · A subharmonic-to-harmonic (odd/even line evidence) octave test. The
-       too-fine direction never changed an answer, because the integer-count
-       snap and the MDL penalty already prevent landing there; the too-coarse
-       direction cost 5.5 points by firing on correct steps.
-     · Overriding the global answer with the tile-integrated one whenever the
-       windows disagreed. Per-window YIN on a quarter-length window is noisier
-       than the global fit, so believing it lost 5-12 points at every
-       disagreement threshold tried. The tile estimate earns its keep as a
-       CANDIDATE, judged like any other, and not as an override. */
-  /* A closure so the cross-axis stage can ask THIS axis what it thinks of a
-     step it never proposed. Comparing the two axes' own confidences does not
-     work: the fused score saturates at its maximum whenever both detectors
-     happen to peak together, which says nothing about absolute quality. */
-  const judge = q => {
-    if(q < lo || q > hi) return 0;
-    const d = dMax > 0 ? Math.max(0, distAt(A, scored, q))/dMax : 0;
-    const y = yMax > 0 ? yinAt(yc, q)/yMax : 0;
-    return d + y;
-  };
-  return {s, score: bs, loss: A ? lossAt(A, s) : 0, judge};
+  /* what this axis thinks of a step it did not choose, for the cross-axis
+     stage — same score, evaluated anywhere */
+  const judge = q => (q < lo || q > hi) ? 0 : combAt(q)*gate(A ? lossAt(A, q) : 0.5);
+  return {s, score: bs, loss: A ? lossAt(A, s) : 0, contrast, judge};
 }
 
 /* ---- rebuild at one true pixel per detected block ---- */

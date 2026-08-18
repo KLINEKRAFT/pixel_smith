@@ -60,14 +60,18 @@ function grabConst(name){
   throw new Error('unbalanced literal for ' + name);
 }
 
+/* Every declaration the detection path touches. A name missing here is not a
+   soft failure: detectGrid throws ReferenceError on every image, the bridge
+   exits, and the run records the method as scoring nothing — which reads
+   exactly like a detector that refuses everything. The self-test at the bottom
+   exists to turn that into a loud death. */
 const FNS = ['cloneImg','hardAlpha','collect','medianCut','chRange','spread','widest','avg',
              'mapPalette','labOf','labDist2','hasAlpha','keyOut','keyPockets',
-             'snapGrid','labelComponents','opaqueMask','lossAt','tileStep',
-             'boundaryProfile','yinPeriod','detectYinAxis','yinCurve','yinAt',
-             'distScoreCurve','distAt','trendAt','detectAxis',
+             'snapGrid','labelComponents','opaqueMask',
              'contentBox','bboxOf','mergeNearColors','cleanIsolated','fillPinholes',
              'modalNeighbour','edgeCleanup',
-             'gridPalette','gridQuant','gridLines','gridSums','gridEnergy','distillAxis','pickStep','detectGrid'];
+             'gridPalette','gridQuant','gridLines','gridSums','gridEnergy','phaseScan',
+             'distillAxis','lossAt','boundaryMaps','raylAt','raylP','detectAxis','detectGrid'];
 const CONSTS = ['RING','ORTH','NOISE_TOL','clamp','GRID','GB'];
 
 class ImageDataShim {
