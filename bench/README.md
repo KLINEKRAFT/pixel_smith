@@ -268,6 +268,7 @@ Recorded so they are not retried:
 | Short-run share as extra native evidence | AUC said +0.05 in the matched band; end to end it was 1.5-2 points WORSE at equal native-safety. The proxy lied |
 | Octave drop, `loss(s/2)/loss(s)`, as native evidence | AUC 0.55 pooled and 0.28 matched — worse than chance. Both losses sit near zero, so the ratio is noise |
 | Normalising contrast by `sqrt(ln M)`, `ln len`, `len^k` | worse in every size band. Contrast growing with axis length is real signal, not a confound |
+| Spectral null comb (`bench/nulls.mjs`) | 0% on blur, bicubic, downup AND noise — the four it was designed for. sinc nulls are invariant to MULTIPLICATIVE damage but any ADDITIVE noise fills a zero in, and those categories all carry quantisation noise. Also drifts an octave fine, since half a candidate's nulls land on true nulls and nothing punishes the half that do not |
 | Concluding from the 8-image subset (twice) | first time: 69.8% reported against a real 57.3%. Second time: a 77.0-vs-76.5 win over Pixel Art Fixer that was really 66.7 vs 72.4. Constants tuned on 344 samples, a sub-point lead read as real |
 
 ### The remaining gap
@@ -298,8 +299,39 @@ Against that, Pixel Smith leads exactly where photometry survives and only
 geometry is damaged: `nonsquare` 80.0 vs 55.0, `cell_texture` 95.0 vs 73.3,
 `clean_nn` 93.3 vs 83.3, `cell_noise` 98.3 vs 91.7.
 
-Closing it needs a signal that does not depend on edge contrast at all. The
-two candidates worth trying, in order: per-tile phase freedom with local step
-integration (what Pixel Art Fixer does, and it wins every one of these
-categories), and drift-aware counting — summing `width_i / s_i` over windows
-rather than fitting one step across the whole axis.
+It is NOT a per-tile-freedom problem, and the numbers say so: the categories
+whose grid is genuinely non-uniform — `warp`, `mush_warp`, `drift`, `jitter`,
+`block_reset`, `row_jitter`, `subpixel_shift` — account for only **-31.7 of
+the -246.7** total category deficit. Thirteen percent. The other 87% is
+UNIFORM grids whose photometry has been wrecked. Building per-tile phase
+freedom, the obvious-looking move, would address almost none of the gap.
+
+Nor is it the guard: re-running with `NATIVE_R` = 0 moves `noise` from 0.0 to
+3.3 and `downup` from 43.3 to 46.7. The detector simply cannot see these
+grids.
+
+The cause is visible in `boundaryMaps`: it reads the FIRST and SECOND
+DIFFERENCE of the scanline. Differencing is a high-pass operation — it
+multiplies the spectrum by |1 - e^(-iw)| — so it amplifies precisely the band
+that blur has already destroyed and that noise dominates. Under heavy low-pass
+the coherence peak and the incoherent floor converge, and ranking and guard
+lose their grip together. The signal is being measured where the evidence has
+been deleted.
+
+The obvious repair — a cue that is blur-INVARIANT rather than merely
+blur-tolerant — has been tried and does not work. Upscaling by s convolves
+with a box of width s, multiplying the spectrum by sinc(pi f s), which is
+exactly zero at f = k/s; a later smooth filter multiplies by another envelope
+and cannot move those nulls. `bench/nulls.mjs` implements that comb and scores
+**0% on blur, bicubic, downup and noise**. The flaw is that a null is a ZERO:
+invariant to multiplicative damage, but any ADDITIVE noise fills it in, and
+every one of those categories carries quantisation noise. Invariance to the
+wrong operation.
+
+So there is no proven route to the remaining 4 points yet. What is known is
+where NOT to spend: per-tile phase freedom (13% of the gap), threshold tuning
+(the guard accounts for 1.7 of 5.7 and is already priced), and any cue built
+on spectral zeros. What would qualify is a statistic that is robust to
+ADDITIVE noise as well as multiplicative attenuation — cepstral peak-picking
+on the log spectrum, or phase-only correlation, are the untested candidates.
+Measure either in isolation on blur/bicubic/downup/noise before integrating.
