@@ -1,0 +1,507 @@
+import { chromium } from 'playwright';
+
+const URL = 'file:///home/user/pixel_smith/index.html';
+const errs = [];
+const log = (...a) => console.log(...a);
+
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
+page.on('pageerror', e => errs.push('PAGEERROR: ' + e.message));
+page.on('console', m => { if (m.type() === 'error' && !/ERR_(CONNECTION|NAME|INTERNET|BLOCKED)/.test(m.text())) errs.push('CONSOLE: ' + m.text()); });  // fonts.googleapis is unreachable in the sandbox
+await page.goto(URL);
+await page.waitForTimeout(400);
+
+/* ── build a synthetic "fake AI pixel art" file and drop it in ───────────
+   A real 64×128 sprite (with deliberate defects), blown up ~23.9× onto a
+   fractional grid, softened, noised, on an opaque off-white background —
+   i.e. exactly what an image generator hands you. */
+await page.evaluate(async () => {
+  const NW = 64, NH = 128;
+  const n = document.createElement('canvas'); n.width = NW; n.height = NH;
+  const g = n.getContext('2d');
+  g.clearRect(0, 0, NW, NH);
+  const px = (x, y, c) => { g.fillStyle = c; g.fillRect(x, y, 1, 1); };
+  const box = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
+
+  const SKIN = '#e0a878', HAIR = '#40302a', SHIRT = '#315c83', PANT = '#2a2f3a', BOOT = '#5a3a24';
+  box(24, 8, 16, 14, HAIR);          // head
+  box(25, 14, 14, 10, SKIN);         // face
+  box(22, 26, 20, 30, SHIRT);        // torso
+  box(14, 28, 8, 24, SHIRT);         // left arm
+  box(42, 28, 8, 24, SHIRT);         // right arm
+  box(14, 52, 8, 6, SKIN);           // left hand
+  box(42, 52, 8, 6, SKIN);           // right hand
+  box(24, 56, 7, 44, PANT);          // left leg
+  box(33, 56, 7, 44, PANT);          // right leg  (2px gap between legs)
+  box(23, 100, 9, 8, BOOT);
+  box(32, 100, 9, 8, BOOT);
+  // diagonal stair-step detail that MUST survive edge cleanup
+  for (let i = 0; i < 10; i++) px(42 + i, 26 - i < 8 ? 8 : 26 - i, '#c4886e');
+  // deliberate defects
+  px(5, 5, '#ffffff'); px(58, 12, '#000000'); px(60, 70, '#ff00ff');   // isolated specks
+  g.clearRect(30, 34, 1, 1); g.clearRect(31, 40, 1, 1);                // pinholes
+  px(21, 30, SHIRT);                                                   // 1px outward bump
+  // near-duplicate colours
+  box(26, 30, 4, 4, '#325d83'); box(30, 44, 3, 3, '#315d84'); box(34, 36, 3, 3, '#305b82');
+
+  /* Fake it the way a generator actually does: real blocks (nearest-neighbour,
+     so the art is genuinely blocky), then softened by a round-trip through a
+     smaller buffer (anti-aliased edges), then landed on a FRACTIONAL pitch so
+     the blocks no longer line up with any integer grid, then noised. A plain
+     bilinear upscale would be a smooth gradient field — blurry, but not fake
+     pixel art, and not a fair test of grid detection. */
+  const P = 23.9;
+  const W = Math.round(NW * P), H = Math.round(NH * P);
+
+  const big = document.createElement('canvas'); big.width = NW * 24; big.height = NH * 24;
+  const bg = big.getContext('2d');
+  bg.fillStyle = '#f4f2ee'; bg.fillRect(0, 0, big.width, big.height);
+  bg.imageSmoothingEnabled = false;                 // crisp blocks first
+  bg.drawImage(n, 0, 0, big.width, big.height);
+
+  const soft = document.createElement('canvas');    // soften the edges
+  soft.width = Math.round(big.width / 3); soft.height = Math.round(big.height / 3);
+  const sg = soft.getContext('2d'); sg.imageSmoothingEnabled = true;
+  sg.drawImage(big, 0, 0, soft.width, soft.height);
+
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  x.fillStyle = '#f4f2ee'; x.fillRect(0, 0, W, H);
+  x.imageSmoothingEnabled = true;
+  x.drawImage(soft, 0.4, 0.7, W, H);                // fractional landing
+
+  const id = x.getImageData(0, 0, W, H), d = id.data;
+  let seed = 12345;                          // LCG: real-looking noise. A noise
+  const rnd = () => {                        // function that is PERIODIC in x
+    seed = (seed * 1664525 + 1013904223) >>> 0;   // plants a fake grid signal and
+    return ((seed >>> 24) % 7) - 3;               // is not a fair test of detection
+  };
+  for (let i = 0; i < d.length; i += 4) {
+    const r = rnd();
+    d[i] = Math.max(0, Math.min(255, d[i] + r));
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + r));
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + r));
+    d[i + 3] = 255;
+  }
+  x.putImageData(id, 0, 0);
+  window.__srcSize = W + 'x' + H;
+
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const file = new File([blob], 'hero_idle.png', { type: 'image/png' });
+  const dt = new DataTransfer(); dt.items.add(file);
+  document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+});
+
+await page.waitForFunction(() => typeof S !== 'undefined' && S.anims.length > 0, null, { timeout: 25000 });
+await page.waitForTimeout(600);
+
+const srcSize = await page.evaluate(() => window.__srcSize);
+log('synthetic input:', srcSize, '(a 64×128 sprite faked onto a 23.9px grid)');
+
+const detect = await page.evaluate(() => {
+  const a = S.anims[0];
+  const bb = bboxOf(a.raw.data, a.raw.width, a.raw.height, 0, 0, a.raw.width, a.raw.height, 1) || {x:0,y:0,w:a.raw.width,h:a.raw.height};
+  return { pitch: a.pitch, conf: a.conf, native: a.native, rejected: a.rejected, hadAlpha: a.hadAlpha, keyBg: a.keyBg,
+           rawGuess: 0 };
+});
+log('detection:', JSON.stringify(detect));
+
+/* ── MAKE PIXEL PERFECT ─────────────────────────────────────────── */
+await page.click('#btnPerfect');
+await page.waitForTimeout(900);
+
+const after = await page.evaluate(() => {
+  const a = S.anims[0], o = a.out;
+  const d = o.frames[0].data;
+  let soft = 0, opaque = 0; const cols = new Set();
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] > 0 && d[i + 3] < 255) soft++;
+    if (d[i + 3]) { opaque++; cols.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]); }
+  }
+  // outline check: every transparent-adjacent opaque ring pixel should be black
+  const w = o.w, h = o.h; let outlinePx = 0;
+  for (let k = 0; k < w * h; k++) {
+    const i = k * 4;
+    if (d[i + 3] && d[i] === 0 && d[i + 1] === 0 && d[i + 2] === 0) outlinePx++;
+  }
+  return {
+    out: o.w + 'x' + o.h, softAlphaPixels: soft, opaque, colours: cols.size,
+    blackOutlinePixels: outlinePx,
+    settings: { outW: S.outW, outH: S.outH, iso: S.iso, pin: S.pin, edge: S.edge, outline: S.outline, merge: S.merge, palMode: S.palMode, quantN: S.quantN },
+    diag: { soft: o.diag.soft, amb: o.diag.amb, perim: o.diag.perimeter, iso: o.diag.iso, pin: o.diag.pin, gaps: o.diag.gaps, dupe: o.diag.dupe, colors: o.diag.colors, fixed: o.diag.fixed, score: o.diag.integrity.score, label: o.diag.integrity.label },
+    ui: { score: document.querySelector('#scoreVal').textContent, label: document.querySelector('#scoreLbl').textContent, native: document.querySelector('#roNative').textContent, lbl16: document.querySelector('#lbl16x').textContent }
+  };
+});
+log('\nafter MAKE PIXEL PERFECT:');
+log(JSON.stringify(after, null, 2));
+
+/* ── assertions ─────────────────────────────────────────────────── */
+const fail = [];
+const ok = (c, m) => { log((c ? '  PASS  ' : '  FAIL  ') + m); if (!c) fail.push(m); };
+log('\nchecks:');
+ok(detect.pitch > 20 && detect.pitch < 28, `block pitch detected near 23.9 (got ${detect.pitch?.toFixed(2)})`);
+// the drawn art occupies x14..51, y8..107 of the 64×128 canvas -> 38×100 native
+ok(detect.native && Math.abs(detect.native.w - 38) <= 1 && Math.abs(detect.native.h - 100) <= 2,
+   `native art reconstructed at 38×100, its true drawn extent (got ${detect.native?.w}×${detect.native?.h})`);
+ok(after.settings.outW === 40 && after.settings.outH === 102,
+   `canvas reserves room for the outline: ${after.settings.outW}×${after.settings.outH} = native + 1px border`);
+ok(after.diag.amb === 0,
+   `one output pixel per source block - zero ambiguous edge alpha (${after.diag.amb})`);
+ok(after.softAlphaPixels === 0, 'binary alpha only — zero partially transparent pixels');
+ok(after.blackOutlinePixels > 100, `true pixel outline painted (${after.blackOutlinePixels} px)`);
+ok(after.colours <= 34, `palette held to target (${after.colours} colours incl. outline)`);
+ok(after.diag.iso === 0, `isolated specks gone (${after.diag.fixed.iso} removed)`);
+ok(after.diag.pin === 0, `pinholes filled (${after.diag.fixed.pin} filled)`);
+ok(after.diag.score >= 90, `pixel integrity ${after.diag.score.toFixed(1)}% — ${after.diag.label}`);
+
+/* Edge cleanup must simplify noise WITHOUT eating the diagonal stair steps.
+   Compare the silhouette at edge=0 vs edge=3 and measure how many pixels the
+   diagonal run lost, not just the total count (kills and fills can cancel). */
+const diagTest = await page.evaluate(() => {
+  const snap = () => {
+    const o = S.anims[0].out, d = o.frames[0].data;
+    const m = new Uint8Array(o.w * o.h);
+    for (let k = 0; k < o.w * o.h; k++) m[k] = d[k * 4 + 3] ? 1 : 0;
+    return { m, w: o.w, h: o.h };
+  };
+  S.outline = 0; S.edge = 0; invalidate(); draw(); const A = snap();
+  S.edge = 3; invalidate(); draw(); const B = snap();
+  S.edge = 1; S.outline = 1; invalidate(); draw();
+  let removed = 0, added = 0, both = 0;
+  for (let k = 0; k < A.m.length; k++) {
+    if (A.m[k] && !B.m[k]) removed++;
+    if (!A.m[k] && B.m[k]) added++;
+    if (A.m[k]) both++;
+  }
+  // count diagonal-run pixels: opaque, with an opaque NW/SE or NE/SW pair and
+  // no orthogonal neighbours - the signature of a stair step
+  const diagCount = X => {
+    let n = 0;
+    for (let y = 1; y < X.h - 1; y++) for (let x = 1; x < X.w - 1; x++) {
+      const k = y * X.w + x;
+      if (!X.m[k]) continue;
+      const orth = X.m[k - 1] + X.m[k + 1] + X.m[k - X.w] + X.m[k + X.w];
+      const dg = (X.m[k - X.w - 1] && X.m[k + X.w + 1]) || (X.m[k - X.w + 1] && X.m[k + X.w - 1]);
+      if (orth <= 1 && dg) n++;
+    }
+    return n;
+  };
+  // every stair pixel present at edge=0 must still be opaque at edge=3
+  let stairLost = 0;
+  for (let y = 1; y < A.h - 1; y++) for (let x = 1; x < A.w - 1; x++) {
+    const k = y * A.w + x;
+    if (!A.m[k]) continue;
+    const orth = A.m[k - 1] + A.m[k + 1] + A.m[k - A.w] + A.m[k + A.w];
+    const dg = (A.m[k - A.w - 1] && A.m[k + A.w + 1]) || (A.m[k - A.w + 1] && A.m[k + A.w - 1]);
+    if (orth <= 1 && dg && !B.m[k]) stairLost++;
+  }
+  return { removed, added, total: both, diagA: diagCount(A), diagB: diagCount(B), stairLost };
+});
+ok(diagTest.removed / Math.max(1, diagTest.total) < 0.06,
+   `edge cleanup HIGH is conservative - removed ${diagTest.removed}/${diagTest.total} px (${(diagTest.removed / diagTest.total * 100).toFixed(1)}%)`);
+ok(diagTest.stairLost === 0,
+   `no diagonal stair pixel eroded at HIGH (${diagTest.diagA} stair pixels, ${diagTest.stairLost} lost)`);
+
+/* outline stays exactly 1 native px at 16× export */
+const outlineScale = await page.evaluate(() => {
+  const a = S.anims[0], o = a.out, s = 16;
+  const c = document.createElement('canvas'); c.width = o.w * s; c.height = o.h * s;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.drawImage(o.cv[0], 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  // scan a row for a run of black; it must be a multiple of 16
+  for (let y = 0; y < c.height; y++) {
+    let run = 0;
+    for (let x = 0; x < c.width; x++) {
+      const i = (y * c.width + x) * 4;
+      const black = d[i + 3] === 255 && d[i] === 0 && d[i + 1] === 0 && d[i + 2] === 0;
+      if (black) run++;
+      else if (run) return { run, mod: run % s };
+    }
+  }
+  return null;
+});
+ok(outlineScale && outlineScale.mod === 0,
+   `16× export keeps outline on the native grid (first black run ${outlineScale?.run}px, ${outlineScale?.run / 16} native px)`);
+
+/* ── manual pixel editing ───────────────────────────────────────── */
+await page.click('#btnEdit');
+await page.waitForTimeout(400);
+const edOpen = await page.isVisible('#edCv');
+ok(edOpen, 'pixel editor opens');
+
+const edResult = await page.evaluate(() => {
+  ED.tool = 'pencil'; ED.color = [255, 0, 0];
+  edSnapshot();
+  const cx = (ED.w >> 1), cy = (ED.h >> 1);
+  edSet(cx, cy); edSet(cx + 1, cy); edSet(cx + 2, cy);
+  edCountChanged();
+  const painted = ED.changed;
+  edUndo(); const afterUndo = ED.changed;
+  edRedo(); const afterRedo = ED.changed;
+  return { painted, afterUndo, afterRedo };
+});
+ok(edResult.painted === 3 && edResult.afterUndo === 0 && edResult.afterRedo === 3,
+   `pencil writes exactly 3 native pixels, undo/redo exact (${JSON.stringify(edResult)})`);
+
+await page.click('#edApply');
+await page.waitForTimeout(500);
+const edApplied = await page.evaluate(() => {
+  const a = S.anims[0], o = a.out, d = o.frames[0].data;
+  const i = ((o.h >> 1) * o.w + (o.w >> 1)) * 4;
+  return {
+    edits: o.diag.edits,
+    pixelIsRed: d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 0,
+    survivesRerender: (() => { invalidate(); const o2 = render(a); const j = ((o2.h >> 1) * o2.w + (o2.w >> 1)) * 4;
+      return o2.frames[0].data[j] === 255 && o2.frames[0].data[j + 1] === 0; })()
+  };
+});
+ok(edApplied.edits === 3 && edApplied.pixelIsRed, `edits applied as a layer (${edApplied.edits} px)`);
+ok(edApplied.survivesRerender, 'edits survive a full re-render (non-destructive layer)');
+
+/* ── non-destructive: settings round-trip returns the identical sprite ── */
+const roundTrip = await page.evaluate(() => {
+  const a = S.anims[0];
+  const sig = () => { invalidate(); const o = render(a); let h = 0;
+    const d = o.frames[0].data; for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) | 0; return h; };
+  const before = sig();
+  S.edge = 3; S.outline = 2; S.quantN = 8; sig();
+  S.merge = false; S.iso = false; sig();
+  S.edge = 1; S.outline = 1; S.quantN = 32; S.merge = true; S.iso = true;
+  return { before, after: sig() };
+});
+ok(roundTrip.before === roundTrip.after, 'pipeline is non-destructive — settings round-trip is bit-identical');
+
+/* ── existing functionality still intact ─────────────────────────── */
+const legacy = await page.evaluate(() => {
+  const r = {};
+  try { S.frame = 0; expStrip(); r.strip = true; } catch (e) { r.strip = 'ERR ' + e.message; }
+  try { expSheet(); r.sheet = true; } catch (e) { r.sheet = 'ERR ' + e.message; }
+  try { expMaster(); r.master = true; } catch (e) { r.master = 'ERR ' + e.message; }
+  try { expJson(); r.json = true; } catch (e) { r.json = 'ERR ' + e.message; }
+  try { expSprite(4); r.sprite4x = true; } catch (e) { r.sprite4x = 'ERR ' + e.message; }
+  try { play(); stop(); r.playback = true; } catch (e) { r.playback = 'ERR ' + e.message; }
+  r.filmstrip = document.querySelectorAll('#filmstrip .cell').length;
+  return r;
+});
+log('\nlegacy exports:', JSON.stringify(legacy));
+ok(Object.entries(legacy).filter(([k]) => k !== 'filmstrip').every(([, v]) => v === true),
+   'strip / grid sheet / master sheet / atlas JSON / scaled PNG / playback all still work');
+
+/* ── multi-frame strip still works ──────────────────────────────── */
+await page.evaluate(async () => {
+  const NW = 32, NH = 32, F = 4;
+  const c = document.createElement('canvas'); c.width = NW * F * 12; c.height = NH * 12;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f2ee'; g.fillRect(0, 0, c.width, c.height);
+  for (let f = 0; f < F; f++) {
+    g.fillStyle = ['#315c83', '#2a5a80', '#345f86', '#305b82'][f];
+    g.fillRect((f * NW + 8) * 12, (10 + f) * 12, 16 * 12, 14 * 12);
+    g.fillStyle = '#e0a878';
+    g.fillRect((f * NW + 12) * 12, 4 * 12, 8 * 12, 8 * 12);
+  }
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const dt = new DataTransfer(); dt.items.add(new File([blob], 'hero_walk.png', { type: 'image/png' }));
+  document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+});
+await page.waitForFunction(() => S.anims.length === 2, null, { timeout: 15000 });
+await page.waitForTimeout(500);
+const strip = await page.evaluate(() => {
+  const a = S.anims[1];
+  S.active = a.id; S.frame = 0; invalidate(); refreshAll();
+  const o = render(a);
+  return { frames: a.frames, out: o.w + 'x' + o.h, cells: document.querySelectorAll('#filmstrip .cell').length,
+           firstStillRepairs: !!S.anims[0].out };
+});
+log('\nstrip:', JSON.stringify(strip));
+ok(strip.frames === 4 && strip.cells === 4, `4-frame strip detected and repaired independently (${strip.out} per frame)`);
+
+
+/* ── explicit output sizing: a tall 64×128 character canvas ─────── */
+const preset = await page.evaluate(() => {
+  const a = S.anims[0];
+  const srcAspect = a.native.w / a.native.h;
+  S.outW = 64; S.outH = 128; invalidate();
+  const o = render(a);
+  const bb = bboxOf(o.frames[0].data, o.w, o.h, 0, 0, o.w, o.h, 128);
+  return { out: o.w + 'x' + o.h, bb, srcAspect, outAspect: bb.w / bb.h,
+           amb: o.diag.amb, score: o.diag.integrity.score };
+});
+ok(preset.out === '64x128', `64×128 preset applied (${preset.out})`);
+ok(Math.abs(preset.srcAspect - preset.outAspect) < 0.06,
+   `character not distorted to fill the canvas — aspect ${preset.srcAspect.toFixed(3)} -> ${preset.outAspect.toFixed(3)} (content ${preset.bb.w}×${preset.bb.h})`);
+ok(preset.bb.w <= 64 && preset.bb.h <= 128, 'content fits inside the canvas');
+
+/* ── regression: art already at native resolution must NOT be snapped ── */
+await page.evaluate(async () => {
+  const c = document.createElement('canvas'); c.width = 48; c.height = 48;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f2ee'; g.fillRect(0, 0, 48, 48);
+  let s2 = 7;
+  const rnd = () => { s2 = (s2 * 1664525 + 1013904223) >>> 0; return (s2 >>> 24) / 255; };
+  const pal = ['#315c83', '#e0a878', '#40302a', '#5a3a24', '#c4886e'];
+  for (let y = 8; y < 40; y++) for (let x = 12; x < 36; x++) {   // real per-pixel art
+    g.fillStyle = pal[(rnd() * pal.length) | 0]; g.fillRect(x, y, 1, 1);
+  }
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const dt = new DataTransfer(); dt.items.add(new File([blob], 'already_native.png', { type: 'image/png' }));
+  document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+});
+await page.waitForFunction(() => S.anims.length === 3, null, { timeout: 15000 });
+await page.waitForTimeout(400);
+const nativeArt = await page.evaluate(() => {
+  const a = S.anims[2];
+  return { pitch: a.pitch, conf: +a.conf.toFixed(3), rejected: a.rejected, cell: a.cellW + 'x' + a.cellH };
+});
+ok(nativeArt.pitch === 0 && !!nativeArt.rejected,
+   `already-native art left alone — not snapped (conf ${nativeArt.conf}: "${nativeArt.rejected}")`);
+ok(nativeArt.cell === '48x48', `already-native art keeps its resolution (${nativeArt.cell})`);
+
+
+/* ── narrow-gap diagnostics: a 1px channel between limbs ────────── */
+const gapTest = await page.evaluate(() => {
+  const w = 32, h = 48;
+  const im = new ImageData(w, h);
+  const set = (x, y) => { const i = (y * w + x) * 4;
+    im.data[i] = 60; im.data[i + 1] = 92; im.data[i + 2] = 131; im.data[i + 3] = 255; };
+  for (let y = 6; y < 40; y++) for (let x = 8; x < 15; x++) set(x, y);   // limb A
+  for (let y = 6; y < 40; y++) for (let x = 16; x < 23; x++) set(x, y);  // limb B
+  //                                    ^ column 15 is a 1px transparent channel
+  const narrow = narrowGaps(im);
+  // widen the channel to 3px and it must stop being flagged
+  const im2 = new ImageData(w, h);
+  const set2 = (x, y) => { const i = (y * w + x) * 4;
+    im2.data[i] = 60; im2.data[i + 1] = 92; im2.data[i + 2] = 131; im2.data[i + 3] = 255; };
+  for (let y = 6; y < 40; y++) for (let x = 8; x < 15; x++) set2(x, y);
+  for (let y = 6; y < 40; y++) for (let x = 18; x < 25; x++) set2(x, y);
+  const wide = narrowGaps(im2);
+  let marked = 0; for (let k = 0; k < w * h; k++) if (narrow.mask[k]) marked++;
+  return { narrowCount: narrow.count, wideCount: wide.count, marked };
+});
+ok(gapTest.narrowCount >= 1 && gapTest.marked >= 30,
+   `1px channel between limbs flagged (${gapTest.narrowCount} region, ${gapTest.marked} px highlighted)`);
+ok(gapTest.wideCount === 0, 'a healthy 3px gap is not flagged');
+
+/* ── pinholes vs legitimate negative space ──────────────────────── */
+const holeTest = await page.evaluate(() => {
+  const w = 32, h = 48;
+  const mk = () => { const im = new ImageData(w, h);
+    for (let y = 4; y < 44; y++) for (let x = 6; x < 26; x++) {
+      const i = (y * w + x) * 4;
+      im.data[i] = 200; im.data[i + 1] = 150; im.data[i + 2] = 100; im.data[i + 3] = 255; }
+    return im; };
+  const clear = (im, x, y) => { im.data[(y * w + x) * 4 + 3] = 0; };
+  const a = mk(); clear(a, 12, 20); clear(a, 18, 30); clear(a, 19, 30);   // 2 pinholes
+  const b = mk();
+  for (let y = 24; y < 44; y++) for (let x = 15; x < 17; x++) clear(b, x, y);  // gap between legs (open to the edge)
+  const c = mk();
+  for (let y = 10; y < 24; y++) for (let x = 10; x < 20; x++) clear(c, x, y);  // big enclosed negative space
+  return { pinholes: fillPinholes(a, 2, false), legGap: fillPinholes(b, 2, false), bigHole: fillPinholes(c, 3, false) };
+});
+ok(holeTest.pinholes === 3, `pinholes found (${holeTest.pinholes} px across 2 holes)`);
+ok(holeTest.legGap === 0, 'gap between the legs is NOT filled (it reaches the border)');
+ok(holeTest.bigHole === 0, 'large enclosed negative space is NOT filled (too big to be a pinhole)');
+
+/* ── merge near colours ─────────────────────────────────────────── */
+const mergeTest = await page.evaluate(() => {
+  const w = 8, h = 4;
+  const im = new ImageData(w, h);
+  const cols = [[0x31,0x5c,0x83],[0x32,0x5d,0x83],[0x31,0x5d,0x84],[0x30,0x5b,0x82],
+                [0xe0,0xa8,0x78],[0xe1,0xa9,0x79],[0x40,0x30,0x2a],[0x5a,0x3a,0x24]];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const c = cols[x], i = (y * w + x) * 4;
+    im.data[i] = c[0]; im.data[i + 1] = c[1]; im.data[i + 2] = c[2]; im.data[i + 3] = 255;
+  }
+  const before = new Set(); const d = im.data;
+  for (let i = 0; i < d.length; i += 4) before.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+  const after = mergeNearColors([im], 6);
+  return { before: before.size, after };
+});
+ok(mergeTest.before === 8 && mergeTest.after === 4,
+   `near-duplicate blues collapse, distinct shades survive (${mergeTest.before} -> ${mergeTest.after} colours)`);
+
+/* ── reference palette: lock from a DIFFERENT image, then every sprite is
+   forced onto exactly those colours. This is the deterministic answer to
+   "the generator has no reference images" — same character, same palette. ── */
+const refPal = await page.evaluate(async () => {
+  /* a reference with six deliberate, well-separated colours */
+  const REF = ['#1a1420', '#f2e8d8', '#c04a3a', '#3a7ac0', '#4aa050', '#e0b040'];
+  const c = document.createElement('canvas'); c.width = 60; c.height = 10;
+  const g = c.getContext('2d');
+  REF.forEach((h, i) => { g.fillStyle = h; g.fillRect(i * 10, 0, 10, 10); });
+  const el = new Image();
+  await new Promise(r => { el.onload = r; el.src = c.toDataURL(); });
+  S.quantN = 6;
+  const n = lockPaletteFromImage(el, 'reference.png');
+  const locked = S.palette.map(hex);
+  /* every reference colour must survive into the locked palette */
+  const near = h => {
+    const t = parseHex(h);
+    return S.palette.some(p => Math.abs(p[0]-t[0]) + Math.abs(p[1]-t[1]) + Math.abs(p[2]-t[2]) < 24);
+  };
+  return { n, mode: S.palMode, ref: S.palRef, locked,
+           allPresent: REF.every(near) };
+});
+ok(refPal.n === 6 && refPal.mode === 'locked' && refPal.allPresent,
+   `palette locked from a reference image (${refPal.n} colours, mode ${refPal.mode}, all reference colours present: ${refPal.allPresent})`);
+ok(refPal.ref === 'reference.png', `locked palette records where it came from (${refPal.ref})`);
+
+/* and a pasted Lospec-style hex list, with junk around it */
+const pasted = await page.evaluate(() => {
+  const txt = 'GIMP Palette\nName: test\n#1a1420\n#f2e8d8  some note\n#c04a3a, #3a7ac0\nnot-a-colour\n#1a1420';
+  const pal = parseHexList(txt);
+  return { n: pal.length, first: hex(pal[0]), last: hex(pal[pal.length-1]) };
+});
+ok(pasted.n === 4 && pasted.first === '#1a1420' && pasted.last === '#3a7ac0',
+   `pasted hex list parses, ignores junk and dedupes (${pasted.n} colours: ${pasted.first}..${pasted.last})`);
+
+const N0 = await page.evaluate(() => S.anims.length);
+/* ── auto frame count, on a sheet the old square-frame guess gets WRONG ──
+   5 frames of 24x40 makes a 120x40 sheet. 120 % 40 == 0 and 120/40 == 3, so
+   "width over height" confidently answers 3 and silently blends the poses. */
+await page.evaluate(async () => {
+  const FW = 24, FH = 40, F = 5, Z = 6;
+  const c = document.createElement('canvas'); c.width = FW * F * Z; c.height = FH * Z;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f2ee'; g.fillRect(0, 0, c.width, c.height);
+  for (let f = 0; f < F; f++) {
+    const lean = f - 2;
+    g.fillStyle = '#315c83';
+    g.fillRect((f * FW + 8 + lean) * Z, 14 * Z, 9 * Z, 18 * Z);
+    g.fillStyle = '#e0a878';
+    g.fillRect((f * FW + 9) * Z, 6 * Z, 7 * Z, 8 * Z);
+  }
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const dt = new DataTransfer(); dt.items.add(new File([blob], 'nonsquare_frames.png', { type: 'image/png' }));
+  document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+});
+await page.waitForFunction(n => S.anims.length === n + 1, N0, { timeout: 15000 });
+await page.waitForTimeout(500);
+const autoF = await page.evaluate(() => {
+  const a = S.anims[S.anims.length - 1];
+  return { frames: a.frames, found: !!a.framesFound,
+           squareGuess: a.el.width % a.el.height === 0 ? a.el.width / a.el.height : 1 };
+});
+ok(autoF.frames === 5 && autoF.found,
+   `auto frame count reads 5 where width/height guesses ${autoF.squareGuess} (got ${autoF.frames}, auto=${autoF.found})`);
+
+
+/* ── responsive ─────────────────────────────────────────────────── */
+await page.setViewportSize({ width: 390, height: 780 });
+await page.waitForTimeout(400);
+const mob = await page.evaluate(() => {
+  const b = document.body;
+  return { hScroll: b.scrollWidth > window.innerWidth + 2, railVisible: !!document.querySelector('.rail').offsetHeight };
+});
+ok(!mob.hScroll, `mobile 390px wide — no horizontal overflow`);
+await page.setViewportSize({ width: 1500, height: 950 });
+await page.waitForTimeout(300);
+
+await page.screenshot({ path: '/tmp/claude-0/-home-user-pixel-smith/0af15aaf-b2e4-5285-ae4b-e62246d1bddd/scratchpad/shot.png' });
+
+log('\njs errors: ' + (errs.length ? '\n' + errs.join('\n') : 'none'));
+await browser.close();
+
+if (fail.length || errs.length) { console.log('\n=== FAILURES ===\n' + [...fail, ...errs].join('\n')); process.exit(1); }
+
+console.log('\n=== ALL CHECKS PASSED ===');

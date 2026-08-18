@@ -584,11 +584,16 @@ body.modal-open{overflow:hidden!important;position:relative}
         </div>
         <div class="btn-grid" style="margin-top:8px">
           <button class="btn span2" id="btnLock">Lock from current</button>
+          <button class="btn span2" id="btnLockRef">Lock from reference image…</button>
+          <button class="btn span2" id="btnPalPaste">Paste hex list</button>
           <button class="btn" id="btnPalCopy">Copy hex</button>
           <button class="btn" id="btnPalClear">Clear</button>
         </div>
+        <input type="file" id="palRefFile" accept="image/*" hidden>
+        <div id="palSrc" class="note hide" style="margin-top:8px"></div>
         <div id="swatches" class="swatches"></div>
         <div class="pal-empty" id="palEmpty">No palette locked. Lock one, then every animation quantizes to the same colours.</div>
+        <div class="note">A <b>reference image</b> is how you keep a generated character on-model: lock its palette once and every later sprite is forced onto exactly those colours, whatever the generator felt like producing. Deterministic — it reads the reference's colours, it does not redraw anything.</div>
       </section>
 
       <section class="sec">
@@ -796,7 +801,7 @@ const S = {
   align: true, anchor: 'feet', floor: 0, matchH: false, contentH: 56,
 
   /* palette */
-  palMode: 'off', quantN: 32, palette: [],
+  palMode: 'off', quantN: 32, palette: [], palRef: '',
 
   /* source grid */
   keyTol: 18, pitch: 0, snapColors: 32, pockets: true, pocketAspect: 4,
@@ -2947,6 +2952,13 @@ function drawPalette(){
   const box = $('#swatches'); box.innerHTML = '';
   const pal = S.palette;
   $('#palEmpty').classList.toggle('hide', pal.length > 0);
+  /* Say where a locked palette came from. "32 colours" is not enough to tell
+     whether you are still on-model with the reference you set an hour ago. */
+  const src = $('#palSrc');
+  if(src){
+    src.textContent = pal.length && S.palRef ? pal.length + ' colours · ' + S.palRef : '';
+    src.classList.toggle('hide', !(pal.length && S.palRef));
+  }
   pal.forEach(c => {
     const d = document.createElement('div');
     d.className = 'sw'; d.style.background = hex(c); d.title = hex(c);
@@ -3696,8 +3708,104 @@ $('#btnLock').onclick = () => {
   $('#rowQuant').classList.remove('hide');
   bounce();
 };
+/**
+ * PALETTE FROM A REFERENCE IMAGE.
+ *
+ * The gap in prompt-driven pixel-art generators is that you cannot hand them a
+ * reference, so two sprites of the "same" character come back on two different
+ * palettes and read as two characters. This closes most of that gap from the
+ * other end: lock the palette off a reference once, and every sprite after it
+ * is forced onto exactly those colours.
+ *
+ * Deterministic, and squarely inside what this tool is: it READS the
+ * reference's colours and remaps to the nearest in OKLab. Nothing is redrawn
+ * and no model is consulted, so the same reference always produces the same
+ * palette.
+ *
+ * The reference is never added to the animation list — it is a colour source,
+ * not artwork to repair.
+ */
+function lockPaletteFromImage(el, label){
+  const c = makeCanvas(el.width, el.height);
+  const x = c.getContext('2d', {willReadFrequently:true});
+  x.drawImage(el, 0, 0);
+  const img = x.getImageData(0, 0, c.width, c.height);
+  /* Deliberately NOT background-keyed. Keying guesses a background from the
+     corners, and on a palette strip or a swatch sheet that guess is a real
+     colour — measured, a six-band reference came back with five. Dropping a
+     colour the user picked is silent and wrong; letting a flat backdrop take
+     one slot is visible in the swatches and fixed by raising the count.
+     collect() already skips genuinely transparent pixels, so real cutouts
+     still work. It also keeps this a pure function of the reference: the same
+     image always yields the same palette, independent of the key tolerance. */
+  const px = collect([img], 24000);
+  if(!px.length) return 0;
+  const pal = medianCut(px, S.quantN);
+  if(!pal.length) return 0;
+  S.palette = pal;
+  S.palMode = 'locked';
+  segSet('#palMode', 'locked');
+  $('#rowQuant').classList.remove('hide');
+  S.palRef = label || '';
+  bounce();
+  return pal.length;
+}
+
+$('#btnLockRef').onclick = () => $('#palRefFile').click();
+$('#palRefFile').onchange = e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(!f) return;
+  const el = new Image();
+  el.onload = () => {
+    const n = lockPaletteFromImage(el, f.name);
+    URL.revokeObjectURL(el.src);
+    const b = $('#btnLockRef'), o = b.textContent;
+    b.textContent = n ? n + ' colours from ' + f.name : 'could not read that image';
+    setTimeout(() => { b.textContent = o; }, 1800);
+  };
+  el.onerror = () => { URL.revokeObjectURL(el.src); };
+  el.src = URL.createObjectURL(f);
+};
+
+/* Lospec and friends hand out palettes as a list of hex codes. Accept any
+   separator and ignore anything that is not a colour, so a pasted .hex file,
+   a .gpl with its header, or a comma-separated line all work. */
+function parseHexList(text){
+  const out = [], seen = new Set();
+  for(const tok of String(text||'').split(/[^0-9a-fA-F#]+/)){
+    const c = parseHex(tok);
+    if(!c) continue;
+    const k = (c[0]<<16)|(c[1]<<8)|c[2];
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(c);
+  }
+  return out;
+}
+
+$('#btnPalPaste').onclick = async () => {
+  const b = $('#btnPalPaste'), o = b.textContent;
+  let text = '';
+  try { text = await navigator.clipboard.readText(); }
+  catch { text = prompt('Paste hex codes (one per line, or any separator):') || ''; }
+  const pal = parseHexList(text);
+  if(!pal.length){
+    b.textContent = 'no hex codes found';
+    setTimeout(() => { b.textContent = o; }, 1600);
+    return;
+  }
+  S.palette = pal;
+  S.palMode = 'locked';
+  segSet('#palMode', 'locked');
+  $('#rowQuant').classList.remove('hide');
+  S.palRef = 'pasted';
+  bounce();
+  b.textContent = pal.length + ' colours locked';
+  setTimeout(() => { b.textContent = o; }, 1600);
+};
+
 $('#btnPalClear').onclick = () => {
-  S.palette = [];
+  S.palette = []; S.palRef = '';
   if(S.palMode === 'locked'){
     S.palMode = 'off';
     segSet('#palMode', 'off');
