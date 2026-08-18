@@ -94,18 +94,50 @@ it is not actually native.
 
 ## Where we stand
 
-Measured on a 60-sprite synthetic corpus, 8 images x 43 categories, all methods
-on identical inputs:
+The **full** 60-image corpus, 2580 scored inputs, every method scored by
+pixel-bench's own runner in one process:
 
-| Method | Exact % | Native-safe % |
+| Method | Exact % | Grid align % | Native-safe % |
+|---|---|---|---|
+| Pixel Smith, old edge-energy comb | 2.9 | 38.2 | - |
+| Naive baseline | 3.7 | 41.7 | 80.0 |
+| Pixel Smith, two detectors + arbiter | 57.3 | 85.0 | 22.5 |
+| **Pixel Smith, coherence ranking + native guard** | **66.7** | **79.1** | **68.3** |
+| Retro Diffusion Pixel Art Fixer | **72.4** | **88.8** | **0.0** |
+
+Two columns of merit, because one of them the benchmark cannot see. Pixel Art
+Fixer is still ahead on exact native size by 5.7 points, and ahead in 30
+categories of 43. It is 0 for 60 on leaving native art alone.
+
+The 5.7 points split cleanly, measured by re-running the full corpus with
+`GRID.NATIVE_R` set to 0:
+
+| Build | Exact % | Native-safe % |
 |---|---|---|
-| Pixel Smith, old edge-energy comb | 2.9 | - |
-| Naive baseline | 4.4 | 80.0 |
-| Pixel Smith, two detectors + arbiter | 57.3 | 22.5 |
-| **Pixel Smith, coherence ranking + native guard** | **77.0** | **86.7** |
-| Retro Diffusion Pixel Art Fixer | 76.5 | **0.0** |
+| Pixel Art Fixer | 72.4 | 0.0 |
+| Pixel Smith, native guard OFF | 68.4 | ~22.5 |
+| Pixel Smith, shipped (`NATIVE_R` 2.0) | 66.7 | 68.3 |
 
-Two columns, because one of them the benchmark cannot see.
+**4.0 points are genuine detector error** — they are still there with the
+guard disabled, and they live entirely in the photometric-damage categories
+below. **1.7 points are what native safety costs**, buying a 45.8-point gain
+in not rewriting the user's own art. Worth it, but a real price, not free.
+
+`NATIVE_R` was tuned on the 8-image subset and has deliberately not been
+re-tuned against the full corpus — doing that would turn the full corpus into
+the tuning set and leave nothing honest to report against.
+
+### Always quote the full corpus
+
+`dump_cases.py` produces an 8-image subset for fast iteration. It is **not** a
+substitute for a full run. Measured on that subset the exact-resolution
+comparison read 77.0 for Pixel Smith against 76.5 for Pixel Art Fixer; on all
+60 images it reads 66.7 against 72.4. Ten points, and the sign flipped. A
+0.5-point lead on 344 samples was always inside the noise, and reading it as
+real cost a retracted claim.
+
+This is the second version of the same mistake — see below — so the rule is
+now unconditional: **iterate on the subset, conclude only on the full run.**
 
 ### Beware the subset
 
@@ -236,18 +268,38 @@ Recorded so they are not retried:
 | Short-run share as extra native evidence | AUC said +0.05 in the matched band; end to end it was 1.5-2 points WORSE at equal native-safety. The proxy lied |
 | Octave drop, `loss(s/2)/loss(s)`, as native evidence | AUC 0.55 pooled and 0.28 matched — worse than chance. Both losses sit near zero, so the ratio is noise |
 | Normalising contrast by `sqrt(ln M)`, `ln len`, `len^k` | worse in every size band. Contrast growing with axis length is real signal, not a confound |
+| Concluding from the 8-image subset (twice) | first time: 69.8% reported against a real 57.3%. Second time: a 77.0-vs-76.5 win over Pixel Art Fixer that was really 66.7 vs 72.4. Constants tuned on 344 samples, a sub-point lead read as real |
 
 ### The remaining gap
 
-`nonsquare` is no longer given up: the cross-axis stage now offers
-independence as a third option, priced against the two shared ones by an
-MDL-style margin (`GRID.NONSQ`), since two steps is one more parameter than
-one. It went 0% -> 75%.
+`nonsquare` is no longer given up: the cross-axis stage offers independence as
+a third option, priced against the two shared ones by an MDL-style margin
+(`GRID.NONSQ`), since two steps is one more parameter than one. 0% -> 80%.
 
-What is left is `warp`, `mush_warp`, `block_reset` and `drift` — every one a
-grid that is not globally uniform, where no single (step, phase) fits and the
-global fit collapses rather than degrades. Pixel Art Fixer handles these with
-per-tile phase freedom and local step integration. Closing them means building
-that, not tuning this. The most promising unexplored route is drift-aware
-counting — summing `width_i / s_i` over windows rather than fitting one step
-across the whole axis.
+What is left is one coherent class, and it is where all 5.7 remaining points
+live: **heavy photometric damage**.
+
+| Category | Smith | Fixer |
+|---|---|---|
+| `noise` | 0.0 | 46.7 |
+| `downup` | 43.3 | 75.0 |
+| `blur` | 60.0 | 83.3 |
+| `bicubic` | 70.0 | 86.7 |
+| `heavy_jpeg` | 16.7 | 33.3 |
+| `ai_upscale` | 48.3 | 63.3 |
+
+Coherence reads boundary ENERGY, and low-pass filtering is precisely the
+operation that flattens it: the peak and the incoherent floor converge, so
+both the ranking and the contrast guard lose their grip at once. That is why
+`noise` is 0% by refusal rather than by a wrong answer — an honest failure,
+but a failure.
+
+Against that, Pixel Smith leads exactly where photometry survives and only
+geometry is damaged: `nonsquare` 80.0 vs 55.0, `cell_texture` 95.0 vs 73.3,
+`clean_nn` 93.3 vs 83.3, `cell_noise` 98.3 vs 91.7.
+
+Closing it needs a signal that does not depend on edge contrast at all. The
+two candidates worth trying, in order: per-tile phase freedom with local step
+integration (what Pixel Art Fixer does, and it wins every one of these
+categories), and drift-aware counting — summing `width_i / s_i` over windows
+rather than fitting one step across the whole axis.
